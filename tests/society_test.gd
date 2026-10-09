@@ -453,4 +453,4 @@ func _summary() -> void:
 	print("[summary] seed=%d pop=%d births=%d couples=%d breakups=%d gov=%s discoveries=%s professions=%s groups=%d traditions=%s projects=%d buildings=%s" % [
 		seed_value, main.tribe.population(), soc.demographics.births, social.romance.couples_formed, social.romance.breakups,
 		soc.politics.government, str(soc.tech.discovered.keys()), str(soc.professions.known_professions.keys()),
-		soc.groups.groups.size(), str(soc.culture.traditions.keys()), soc.proposals.completed, str(buildings)])
+		soc.groups.groups.size(), str(soc.culture.tradition_names()), soc.proposals.completed, str(buildings)])

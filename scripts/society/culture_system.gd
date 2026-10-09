@@ -33,6 +33,7 @@ const YEARLY: Array[StringName] = [&"commemoration", &"leader_remembrance", &"an
 const CEREMONY_SECONDS := 40.0
 const ACTIVE := ["emerging", "established", "central", "contested", "fading"]
 const YOUNG_MAX_AGE := 28.0
+const GENERIC_CAUSES := ["teaching", "legacy", "custom", "stories", "age", "work_land", "work_craft", "ceremony"]
 ## Customs a single family may keep as its own (others belong to the whole tribe).
 const FAMILY_CUSTOMS: Array[StringName] = [&"funeral_rites", &"ancestor_veneration", &"kin_naming", &"partnership_feast",
 	&"vows", &"birth_welcome", &"coming_of_age_trial", &"coming_of_age_teaching", &"evening_fire", &"storytelling"]
@@ -54,7 +55,8 @@ const CAUSES := {
 	"discovered": "new things were discovered", "taught_by_elder": "elders taught the young", "taught": "knowledge was passed on",
 	"mastery_craft": "people mastered crafts", "mastery_land": "people mastered work on the land",
 	"mastery_healing": "people mastered healing", "project_done": "shared projects succeeded",
-	"project_failed": "plans failed and people fell back on old ways", "leader_chosen": "leaders were chosen",
+	"project_failed": "plans failed and people fell back on old ways", "built": "people built together",
+	"endorsed": "people rallied behind would-be leaders", "leader_chosen": "leaders were chosen",
 	"vetoed": "the leadership blocked plans", "overthrown": "leaders were cast down", "rival_honored": "rivals were honoured",
 	"ceremony": "people took part in ceremonies", "work_land": "people worked the land", "work_craft": "people worked with their hands",
 	"age": "the old grew set in their ways", "youth": "the young questioned what their elders believed",
@@ -107,6 +109,14 @@ var _last_snapshot_day := -1
 var _phase := 0
 var _step := 0
 var _firsts: Dictionary = {}
+var _anchors: Dictionary = {}
+## kind -> day the tribe last abandoned a custom of that kind
+var _abandoned_day: Dictionary = {}
+## Profiling: worst time (ms) of each periodic step.
+var step_max_ms: Dictionary = {}
+var _last_count_key := ""
+## How often each new building style has been put to the builders.
+var style_attempts: Dictionary = {}
 
 
 func _init(s: SocietySystem) -> void:
@@ -158,12 +168,26 @@ func _shift(v: Villager, k: StringName, delta: float, cause: String) -> void:
 	var led: Dictionary = causes.get(k, {})
 	led[cause] = float(led.get(cause, 0.0)) + delta
 	causes[k] = led
-	cause_counts[cause] = int(cause_counts.get(cause, 0)) + 1
+	# Count experiences, not the several beliefs one experience moves.
+	var ck := "%d:%s:%d" % [v.villager_id, cause, SimClock.tick_count]
+	if ck != _last_count_key:
+		_last_count_key = ck
+		cause_counts[cause] = int(cause_counts.get(cause, 0)) + 1
 	var c := _cohort(v)
 	if c != "":
 		var cl: Dictionary = cohort_causes[c].get(k, {})
 		cl[cause] = float(cl.get(cause, 0.0)) + delta
 		cohort_causes[c][k] = cl
+
+
+## Where someone's beliefs settle without outside influence: their temperament.
+func _anchor(v: Villager) -> Dictionary:
+	if not _anchors.has(v.villager_id):
+		var a := CulturalValues.from_personality(v.personality)
+		for k in a.values:
+			a.values[k] = clampf(float(a.values[k]) * 2.5, -0.6, 0.6)
+		_anchors[v.villager_id] = a.values
+	return _anchors[v.villager_id]
 
 
 func _cohort(v: Villager) -> String:
@@ -466,8 +490,8 @@ func on_social_event(v: Villager, kind: StringName, rec: Dictionary) -> void:
 				_shift(v, &"knowledge", 0.04, "mastery_healing")
 			_shift(v, &"achievement", 0.03, "mastery_craft")
 		&"built_together", &"built":
-			_shift(v, &"cooperation", 0.006, "project_done")
-			_shift(v, &"craftsmanship", 0.006, "work_craft")
+			_shift(v, &"cooperation", 0.006, "built")
+			_shift(v, &"craftsmanship", 0.006, "built")
 		&"project_completed":
 			_shift(v, &"achievement", 0.04, "project_done")
 			_shift(v, &"cooperation", 0.02, "project_done")
@@ -479,7 +503,7 @@ func on_social_event(v: Villager, kind: StringName, rec: Dictionary) -> void:
 		&"lost_leadership":
 			_shift(v, &"equality", 0.02, "overthrown")
 		&"endorsed":
-			_shift(v, &"hierarchy", 0.01, "leader_chosen")
+			_shift(v, &"hierarchy", 0.01, "endorsed")
 		&"vetoed":
 			_shift(v, &"equality", 0.04, "vetoed")
 		&"rival_honored":
@@ -945,6 +969,9 @@ func _check_patterns() -> void:
 			var kind := CustomCatalog.get_kind(kind_id)
 			if int(p["count"]) < int(kind["needs"]) or not _requirements_met(kind):
 				continue
+			# A custom the tribe has just let go of is not taken up again at once.
+			if SimClock.get_day() - int(_abandoned_day.get(String(kind_id), -1000)) < 25:
+				continue
 			if pattern == "commemoration" and _commemoration_target() < 0:
 				continue
 			var f := fitness(kind_id, vals, p) + society.rng.randf() * 0.04
@@ -997,6 +1024,11 @@ func _found_custom(kind_id: StringName, pattern: String, p: Dictionary, vals: Di
 			if all > 0 and float(inside) / all >= 0.8:
 				scope = fam
 				scope_name = society.groups.groups[fam]["name"]
+	for other in customs.values():
+		if other["kind"] == String(kind_id) and int(other["scope"]) == scope and other["status"] in ACTIVE:
+			p["count"] = 0
+			p["who"] = {}
+			return {}  # they already keep it
 	# Form: the variant that best expresses the founders' beliefs.
 	var cv := CulturalValues.new()
 	cv.values = vals.duplicate()
@@ -1116,7 +1148,7 @@ func _update_customs() -> void:
 			continue
 		var cid: int = c["id"]
 		if int(c["scope"]) >= 0 and not society.groups.groups.has(int(c["scope"])):
-			_abandon(c, "%s no longer exists as a group" % c["scope_name"])
+			_abandon(c, "%s, who kept it, have broken up" % c["scope_name"])
 			continue
 		var age_days := SimClock.get_day() - int(c["day"])
 		var n := 0
@@ -1144,8 +1176,16 @@ func _update_customs() -> void:
 			if age_days > 6:
 				target += 0.35 * cv.get_value(&"tradition")
 			# People take up what those close to them keep.
-			target += 0.6 * _close_devotion(v, cid)
+			target += 0.35 * _close_devotion(v, cid)
 			var p := v.personality
+			# Temperament: the independent resist collective rites, the
+			# curious tire of old customs, the loyal hold on to them.
+			var collective := float(c["values"].get(&"cooperation", 0.0)) + float(c["values"].get(&"tradition", 0.0)) \
+					+ float(c["values"].get(&"hierarchy", 0.0)) + float(c["values"].get(&"spirituality", 0.0))
+			target -= 0.6 * (p.get_trait(&"independence") - 0.5) * minf(1.0, collective)
+			if age_days > 20:
+				target -= 0.6 * (p.get_trait(&"curiosity") - 0.5)
+			target += 0.4 * (p.get_trait(&"loyalty") - 0.5)
 			# Restless youth push back against what their elders hold dear.
 			if v.age_years < society.ctx.config.adult_age + 8.0 and (p.get_trait(&"independence") + p.get_trait(&"curiosity")) > 1.15 \
 					and float(c["old"]) > 0.5 and age_days > 8:
@@ -1425,6 +1465,7 @@ func _maybe_reform(c: Dictionary) -> void:
 
 
 func _abandon(c: Dictionary, why: String) -> void:
+	_abandoned_day[String(c["kind"])] = SimClock.get_day()
 	c["status"] = "abandoned"
 	c["ended"] = SimClock.get_day()
 	var text := "The %s has been abandoned: %s" % [String(c["word"]).capitalize(), why.trim_suffix(".") + "."]
@@ -1720,10 +1761,12 @@ func _work_drift() -> void:
 			_shift(v, &"craftsmanship", 0.0015 * craft, "work_craft")
 		if v.life_stage() == &"elder":
 			_shift(v, &"tradition", 0.002, "age")
-		# Beliefs that are not fed by experience slowly lose their hold.
+		# Beliefs that are not fed by experience drift back towards the
+		# person's own temperament, so people never become all alike.
 		var cv := values_of(v)
+		var anchor := _anchor(v)
 		for k in CulturalValues.VALUES:
-			cv.values[k] = float(cv.values[k]) * 0.996
+			cv.values[k] = lerpf(float(cv.values[k]), float(anchor.get(k, 0.0)), 0.012)
 		# Stories one knows keep their values alive.
 		if (v.villager_id + _phase) % 4 == 0:
 			for e in lore.known_by(v.villager_id):
@@ -1808,7 +1851,7 @@ func _top_cause(k: StringName, ledger: Dictionary = {}) -> String:
 	var best := ""
 	var bv := 0.0
 	for cause in led:
-		var w := float(led[cause]) * signf(x if x != 0.0 else 1.0)
+		var w := float(led[cause]) * signf(x if x != 0.0 else 1.0) * (0.3 if cause in GENERIC_CAUSES else 1.0)
 		if w > bv:
 			bv = w
 			best = cause
@@ -1822,6 +1865,10 @@ func explain_value(k: StringName) -> String:
 	var list := []
 	for cause in led:
 		var w := float(led[cause]) * (1.0 if x >= 0.0 else -1.0)
+		# Specific experiences explain more than the general background of
+		# teaching, stories and habit that carries any culture.
+		if cause in GENERIC_CAUSES:
+			w *= 0.3
 		if w > 0.0:
 			list.append([cause, w])
 	list.sort_custom(func(a, b): return a[1] > b[1])
@@ -1829,7 +1876,7 @@ func explain_value(k: StringName) -> String:
 	for item in list.slice(0, 3):
 		var n := int(cause_counts.get(item[0], 0))
 		var phrase: String = CAUSES.get(item[0], item[0])
-		parts.append(phrase + (" (%d times)" % n if n > 1 and not item[0] in ["teaching", "legacy", "custom", "stories", "age", "work_land", "work_craft"] else ""))
+		parts.append(phrase + (" (%d times)" % n if n > 1 and not item[0] in GENERIC_CAUSES else ""))
 	if parts.is_empty():
 		return ""
 	return "Mostly because " + ", ".join(parts) + "."
@@ -2136,7 +2183,11 @@ func _vote_style(tech: StringName, name: String) -> void:
 		text = "A new way of building: %s. %d young builders embraced it%s; homes built from now on will look different." % [
 				name, young_yes, (", over the objections of %d older builders who favoured the old ways" % old_no) if old_no > 0 else ""]
 	else:
+		var again := int(style_attempts.get(String(tech), 0))
 		aesthetics.rejected_styles[tech] = SimClock.get_day()
+		style_attempts[String(tech)] = again + 1
+		if again > 0 and again % 4 != 0:
+			return  # the same old argument; not news any more
 		text = "Some builders wanted %s, but the older builders' traditional ways prevailed (%d%% of builders' weight against)." % [
 				name, int(no / (yes + no) * 100.0)]
 	society.history.add(&"culture", text, [])
@@ -2502,6 +2553,13 @@ func tick(dt: float) -> void:
 
 
 func _run_step(step: int) -> void:
+	var t0 := Time.get_ticks_usec()
+	_run_step_inner(step)
+	var ms := (Time.get_ticks_usec() - t0) / 1000.0
+	step_max_ms[step] = maxf(float(step_max_ms.get(step, 0.0)), ms)
+
+
+func _run_step_inner(step: int) -> void:
 	match step:
 		0: _enculturate()
 		1:
@@ -2594,7 +2652,8 @@ func to_dict() -> Dictionary:
 		"core": _plain(core_levels), "legacies": lg, "movements": movements.duplicate(true), "changes": changes.duplicate(true),
 		"counters": counters.duplicate(), "violations": violations.duplicate(true), "divides": _plain(divides),
 		"blessings": bl, "vowed": vw, "famine": _plain(famine), "firsts": _firsts.duplicate(), "snapday": _last_snapshot_day,
-		"language": language.to_dict(), "lore": lore.to_dict(), "art": aesthetics.to_dict(), "phase": _phase, "timer": _timer, "step": _step}
+		"language": language.to_dict(), "lore": lore.to_dict(), "art": aesthetics.to_dict(), "phase": _phase, "timer": _timer, "step": _step,
+		"style_attempts": style_attempts.duplicate(), "abandoned_day": _abandoned_day.duplicate()}
 
 
 ## StringName keys -> String so saved data compares equal after loading.
@@ -2687,5 +2746,7 @@ func load_dict(d: Dictionary) -> void:
 	_phase = int(d["phase"])
 	_timer = float(d["timer"])
 	_step = int(d.get("step", 0))
+	style_attempts = Dictionary(d.get("style_attempts", {})).duplicate()
+	_abandoned_day = Dictionary(d.get("abandoned_day", {})).duplicate()
 	restyle_from_save()
 	_update_adornments()

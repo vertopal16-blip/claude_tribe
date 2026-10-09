@@ -268,11 +268,17 @@ func _check_old_age(v: Villager, day_fraction: float) -> void:
 		v.die("old age")
 
 
+func _sorted_names() -> Array:
+	var n := _used_names.keys()
+	n.sort()
+	return n
+
+
 func to_dict() -> Dictionary:
 	var pbc := {}
 	for cid in parents_by_child:
 		pbc[str(cid)] = parents_by_child[cid]
-	return {"births": births, "natural_deaths": natural_deaths, "parents": pbc, "names": _used_names.keys(),
+	return {"births": births, "natural_deaths": natural_deaths, "parents": pbc, "names": _sorted_names(),
 		"stage": _stage.duplicate()}
 
 

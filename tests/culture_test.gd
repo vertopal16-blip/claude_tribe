@@ -125,6 +125,7 @@ func _mechanism_checks() -> void:
 	var e: Villager = adults[3]
 	var saved_customs := c.customs.duplicate(true)
 	var saved_patterns := c.patterns.duplicate(true)
+	c._abandoned_day.clear()  # the cooldown after abandoning a custom is not under test here
 
 	# --- A. The same hardship gives different customs to different people ---
 	c.customs.clear()

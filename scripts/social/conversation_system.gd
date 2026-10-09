@@ -126,9 +126,13 @@ func _initiative(v: Villager) -> float:
 
 
 func _advance(c: Dictionary, dt: float) -> void:
+	# A participant who died may already have been freed.
+	if not is_instance_valid(c["speaker"]) or not is_instance_valid(c["listener"]):
+		_finish(c, false)
+		return
 	var s: Villager = c["speaker"]
 	var l: Villager = c["listener"]
-	var still_talking: bool = is_instance_valid(s) and is_instance_valid(l) and not s.is_dead and not l.is_dead \
+	var still_talking: bool = not s.is_dead and not l.is_dead \
 			and s.current_task == c["task_s"] and l.current_task == c["task_l"]
 	c["elapsed"] += dt
 	if not still_talking or c["elapsed"] > ABANDON_AFTER:

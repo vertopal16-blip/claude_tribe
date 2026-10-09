@@ -321,6 +321,7 @@ func _perf_report() -> void:
 	for k in tribe.perf_section_max:
 		maxes.append("%s=%.1f" % [k, tribe.perf_section_max[k]])
 	print("[test] PERF worst tick per section (ms): %s" % " ".join(maxes))
+	print("[test] PERF worst culture step (ms): %s" % str(main.ctx.society.culture.step_max_ms))
 	check(tribe.population() > 0, "Large population still alive")
 	check(tribe.perf_mean_tick_ms() < 15.0, "Mean sim tick under 15 ms with %d villagers (%.2f ms)" % [tribe.population(), tribe.perf_mean_tick_ms()])
 
@@ -540,6 +541,7 @@ func _social_checks() -> void:
 	needy.place_at(giver.global_position + Vector3(1.5, 0, 0))
 	tribe._update_separation()  # refresh the proximity index for the new position
 	needy.needs.hunger = 90.0
+	needy.set_task(null)  # not already on the way to eat
 	needy.inventory.take_all()
 	giver.inventory.take_all()
 	giver.inventory.add(ResourceType.FOOD, 5)

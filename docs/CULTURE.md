@@ -367,7 +367,32 @@ godot --headless --path . res://tests/culture_test.tscn --fixed-fps 60 -- --seed
 godot --headless --path . res://tests/culture_test.tscn --fixed-fps 60 -- --seed=2024 --days=200 --report-only --chronicle
 ```
 
-See the README for the latest results.
+Results measured on the committed version:
+
+- **Mechanism checks.** 46 checks, covering A–J and save/load, all pass on
+  seeds 42, 1234, 777, 2024 and 5. Seeds 42, 1234, 777 and 2024 were run for
+  40 days, seed 5 for 30.
+- **Different cultures from different seeds** (day 40):
+
+| Seed | Top values | Customs alive | Art | Some words |
+|---|---|---|---|---|
+| 42 | nature, cooperation, knowledge | harvest feast, sharing, kin naming (fading), tree-thanks | sashes, dots | Vor, Chamu, Bevachu, Momurair |
+| 1234 | knowledge, curiosity, achievement | none (rationing and tree-thanks were tried and dropped) | none yet | Eya, Gesichi, Eori, Saeise |
+| 777 | cooperation, nature, family | newborn gifts, sharing, hereditary chiefs, harvest feast, evening fire | carving, dots, painted walls | Yu, Bifaa, Shashua, Puyuyi |
+| 2024 | hierarchy, curiosity, knowledge | harvest feast, tree-thanks; partnership feast and kin naming fading | carving, hatching, painted walls | Kuk, Yureshus, Shishu, Rerishu |
+
+- **Long runs.** Two 200-day runs (about 100 simulated years) were made with
+  the final belief dynamics. Both tribes survived and grew, from 8 founders to
+  33 (seed 2024) and 43 (seed 42).
+  - Customs were founded, became central, and five were abandoned in each run.
+  - Guilds and families kept customs of their own.
+  - Stories outlived their witnesses through retelling, and some were
+    forgotten.
+  - Children were named in the tribe's own sounds.
+  - Young and old differed in their support for customs; for example 71% of
+    the young against 100% of the old kept the partnership feast.
+- **Performance.** With 208 villagers the mean tick is 13.3 ms. The culture
+  work is spread over 5 ticks; its worst step took about 23 ms.
 
 ## Limitations
 
@@ -380,8 +405,15 @@ See the README for the latest results.
   motifs on buildings, totems, memorial stones and the gathering circle. There
   is no pottery, no clothing cut, and no group-specific patterns beyond guild
   belts.
-- **Movements and reform.** These need contested customs, which mostly appear
-  once a second generation has grown up. In short runs (under about 40 days)
-  they are rare.
+- **Contested customs, movements, reform and generational divides** are
+  implemented and pass the mechanism checks. However, in the long runs
+  measured so far opposition stayed at 0–4%, so no custom became contested,
+  no movement formed and no divide of 0.25 or more was announced on its own.
+  Conformity and tradition still outweigh dissent. Only differences in support
+  between young and old emerged.
+- **Art progress depends on the run.** Seed 42 stayed at art level 1 for 200
+  days because it never valued craftsmanship enough or learned toolmaking.
+  A new architectural style was proposed but rejected by the older builders
+  in every vote recorded, so all long runs have a single era (painted walls).
 - **No other tribes.** As specified, there is only one tribe. Migration
   within the territory is not modelled.
