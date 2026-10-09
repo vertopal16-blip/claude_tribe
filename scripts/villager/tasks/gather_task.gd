@@ -23,9 +23,13 @@ func _init(v: Villager, goal: StringName, type: int) -> void:
 	resource_type = type
 
 
+const SKILL_FOR := {ResourceType.FOOD: &"foraging", ResourceType.WOOD: &"woodcutting", ResourceType.STONE: &"stonework"}
+
+
 func start() -> bool:
 	if villager.inventory.free_space_for(resource_type) <= 0:
 		return false
+	ctx.society.economy.equip(villager)
 	return _acquire_node(INF)
 
 
@@ -84,7 +88,9 @@ func tick(dt: float) -> int:
 				villager.knowledge.verify(node)
 				_release()
 				return _next_source_or_return()
-			_timer += dt * villager.needs.performance()
+			var skill: StringName = SKILL_FOR[resource_type]
+			_timer += dt * villager.work_efficiency(skill)
+			villager.practice(skill, dt)
 			if _timer >= ctx.config.gather_interval:
 				_timer -= ctx.config.gather_interval
 				var got := node.harvest(1)

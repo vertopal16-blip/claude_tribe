@@ -28,6 +28,9 @@ const GATHER_GOALS := {
 	GOAL_GATHER_STONE: ResourceType.STONE,
 }
 
+## Specialised work offered by the society layer (see SocietySystem.add_work_goals).
+const WORK_GOALS := [&"farm", &"fish", &"craft", &"heal"]
+
 const BLACKLIST_SECONDS := 60.0
 ## Non-urgent choices are sampled among options scoring within this fraction
 ## of the best one, so traits and moods shift behaviour probabilistically.
@@ -41,8 +44,15 @@ var modifiers: Array[DecisionModifier] = []
 var last_work_goal: StringName = &""
 ## Scores from the last decision, for inspection / debugging.
 var last_scores: Dictionary = {}
+## Why each goal scored what it did: goal -> ["base", "reason", "Modifier xN", ...].
+var last_trace: Dictionary = {}
+## What was chosen last time and when.
+var last_choice: StringName = &""
+var last_choice_time := 0.0
 
 var _blacklist: Dictionary = {}  # instance_id -> expiry sim time
+## Goals others asked for or agreed to: goal -> [bonus, expiry, reason].
+var suggestions: Dictionary = {}
 var _think_timer := 0.0
 ## Seeded per villager: decisions are random but reproducible.
 var rng := RandomNumberGenerator.new()
@@ -55,6 +65,11 @@ func _init(v: Villager) -> void:
 	# Seeded from the world seed so a replayed world makes the same choices.
 	rng.seed = hash([v.ctx.world_seed, v.villager_id])
 	_think_timer = rng.randf_range(0.0, 0.6)  # stagger decisions across villagers
+
+
+## Someone asked us to do something (or we promised): favour it for a while.
+func suggest(goal: StringName, bonus: float, seconds: float, reason: String) -> void:
+	suggestions[goal] = [bonus, SimClock.sim_time + seconds, reason]
 
 
 func add_modifier(m: DecisionModifier) -> void:
@@ -137,7 +152,9 @@ func score_goals() -> Dictionary:
 	else:
 		scores[GOAL_REST] = 0.0
 
-	scores[GOAL_BUILD] = 0.58 if tribe.has_build_job_for(villager) else 0.0
+	var works := villager.work_capacity() > 0.0
+	var adult := villager.is_adult()
+	scores[GOAL_BUILD] = 0.58 if adult and tribe.has_build_job_for(villager) else 0.0
 
 	# Gathering needs a known location; otherwise the need drives exploration.
 	_explore_type = ResourceType.NONE
@@ -147,7 +164,9 @@ func score_goals() -> Dictionary:
 	for goal: StringName in GATHER_GOALS:
 		var type: int = GATHER_GOALS[goal]
 		var demand := tribe.get_demand(type)
-		if villager.knowledge.knows_available(type):
+		if not works:
+			scores[goal] = 0.0
+		elif villager.knowledge.knows_available(type):
 			scores[goal] = demand * 0.5 + rng.randf() * 0.06
 		else:
 			scores[goal] = 0.0
@@ -159,7 +178,7 @@ func score_goals() -> Dictionary:
 	if needs.is_hungry() and not _can_eat_somewhere():
 		explore = 0.92 if needs.is_starving() else 0.7
 		_explore_type = ResourceType.FOOD
-	scores[GOAL_EXPLORE] = 0.0 if night else explore
+	scores[GOAL_EXPLORE] = 0.0 if night or not works else explore
 
 	# Loneliness; evenings by the fire are the social hour.
 	var lonely := needs.social / 100.0
@@ -168,7 +187,7 @@ func score_goals() -> Dictionary:
 	scores[GOAL_SOCIALIZE] = 0.0 if night else (lonely * 0.8 + evening if needs.social > 25.0 else evening * 0.5)
 
 	scores[GOAL_HELP] = 0.0
-	if villager.inventory.carried_type == ResourceType.FOOD:
+	if villager.inventory.carried_type == ResourceType.FOOD and works:
 		var needy := villager.ctx.social.find_person_to_help(villager)
 		if needy != null:
 			var close := villager.ctx.social.closeness(villager.villager_id, needy.villager_id)
@@ -185,10 +204,37 @@ func score_goals() -> Dictionary:
 			scores[GOAL_ASK_FOOD] = (0.95 if needs.is_starving() else 0.72) \
 					* lerpf(1.15, 0.75, p.get_trait(&"independence")) * lerpf(0.85, 1.1, p.get_trait(&"trust"))
 
-	scores[GOAL_IDLE] = 0.02
+	# Specialised work (farms, fishing, workshops, healing, ceremonies) is
+	# offered by the society layer when the means exist.
+	if works and not night:
+		villager.ctx.society.add_work_goals(villager, scores)
 
+	# Children play near their family instead of working.
+	scores[GOAL_IDLE] = 0.3 if villager.is_child() and not night else 0.02
+
+	# Things we were asked to do or promised.
+	var reasons := {}
+	for g in suggestions.keys():
+		var sg: Array = suggestions[g]
+		if SimClock.sim_time > sg[1]:
+			suggestions.erase(g)
+		elif scores.has(g) and scores[g] > 0.0:
+			scores[g] += sg[0]
+			reasons[g] = sg[2]
+
+	# Decision trace for the inspector: base score, then each modifier's effect.
+	var trace := {}
+	for g in scores:
+		trace[g] = ["%.2f" % scores[g]]
+		if reasons.has(g):
+			trace[g].append(reasons[g])
 	for m in modifiers:
+		var before := scores.duplicate()
 		m.modify_scores(villager, scores)
+		for g in scores:
+			if before.has(g) and before[g] > 0.0 and absf(scores[g] - before[g]) > 0.005:
+				trace[g].append("%s x%.2f" % [m.get_label(), scores[g] / before[g]])
+	last_trace = trace
 	return scores
 
 
@@ -205,8 +251,10 @@ func choose_task() -> VillagerTask:
 		if task == null:
 			continue
 		if task.start():
-			if GATHER_GOALS.has(goal) or goal == GOAL_BUILD:
+			if GATHER_GOALS.has(goal) or goal == GOAL_BUILD or WORK_GOALS.has(goal):
 				last_work_goal = goal
+			last_choice = goal
+			last_choice_time = SimClock.sim_time
 			return task
 		task.finish()
 	var idle := IdleTask.new(villager, GOAL_IDLE)
@@ -252,6 +300,9 @@ func _create_task(goal: StringName) -> VillagerTask:
 		GOAL_ASK_FOOD: return AskFoodTask.new(villager, goal)
 	if GATHER_GOALS.has(goal):
 		return GatherTask.new(villager, goal, GATHER_GOALS[goal])
+	var task := villager.ctx.society.create_task(villager, goal)
+	if task != null or SocietySystem.GOALS.has(goal):
+		return task  # null: nobody to talk to or nothing to work on right now
 	push_warning("Unknown goal %s" % goal)
 	return null
 

@@ -20,6 +20,11 @@ const BINDINGS := {
 	&"follow_selected": [KEY_F],
 	&"cancel": [KEY_ESCAPE],
 	&"toggle_debug": [KEY_F3],
+	&"toggle_inspect": [KEY_I],
+	&"toggle_chronicle": [KEY_C],
+	&"toggle_tribe": [KEY_T],
+	&"quick_save": [KEY_F5],
+	&"quick_load": [KEY_F9],
 }
 
 

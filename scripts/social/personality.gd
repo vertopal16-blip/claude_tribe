@@ -1,12 +1,15 @@
 class_name Personality
 extends RefCounted
-## Ten traits in [0, 1] (0.5 = average). Generated from a seed, then drift
-## slowly with experience, never more than MAX_DRIFT away from the trait the
-## villager was born with.
+## A villager's temperament: 19 traits in [0, 1] (0.5 = average).
+## Generated from a seed (or inherited from parents with variation), then
+## drifting slowly with experience, never more than MAX_DRIFT away from the
+## trait the villager was born with.
 
 const TRAITS: Array[StringName] = [
-	&"sociability", &"ambition", &"aggressiveness", &"generosity", &"curiosity",
-	&"courage", &"trust", &"independence", &"industriousness", &"empathy"]
+	&"sociability", &"ambition", &"empathy", &"aggressiveness", &"curiosity",
+	&"courage", &"honesty", &"generosity", &"jealousy", &"patience",
+	&"independence", &"loyalty", &"competitiveness", &"risk_tolerance", &"creativity",
+	&"industriousness", &"trust", &"status_desire", &"social_need"]
 
 const MAX_DRIFT := 0.2
 
@@ -14,18 +17,38 @@ const MAX_DRIFT := 0.2
 const WORDS := {
 	&"sociability": ["Outgoing", "Reserved"],
 	&"ambition": ["Ambitious", "Unambitious"],
+	&"empathy": ["Caring", "Cold"],
 	&"aggressiveness": ["Hot-headed", "Gentle"],
-	&"generosity": ["Generous", "Selfish"],
 	&"curiosity": ["Curious", "Incurious"],
 	&"courage": ["Brave", "Timid"],
-	&"trust": ["Trusting", "Suspicious"],
+	&"honesty": ["Honest", "Deceitful"],
+	&"generosity": ["Generous", "Selfish"],
+	&"jealousy": ["Jealous", "Secure"],
+	&"patience": ["Patient", "Impulsive"],
 	&"independence": ["Independent", "Communal"],
+	&"loyalty": ["Loyal", "Fickle"],
+	&"competitiveness": ["Competitive", "Easygoing"],
+	&"risk_tolerance": ["Daring", "Cautious"],
+	&"creativity": ["Inventive", "Conventional"],
 	&"industriousness": ["Hard-working", "Lazy"],
-	&"empathy": ["Caring", "Cold"],
+	&"trust": ["Trusting", "Suspicious"],
+	&"status_desire": ["Proud", "Humble"],
+	&"social_need": ["Needs company", "Self-sufficient"],
 }
 
 var base: Dictionary = {}
 var values: Dictionary = {}
+
+
+## A child's temperament: mostly a blend of the parents, partly its own.
+static func inherit(a: Personality, b: Personality, rng: RandomNumberGenerator) -> Personality:
+	var p := Personality.new()
+	for t in TRAITS:
+		var blend: float = (a.base[t] + b.base[t]) * 0.5
+		var v := clampf(lerpf(blend, rng.randfn(0.5, 0.2), 0.45), 0.03, 0.97)
+		p.base[t] = v
+		p.values[t] = v
+	return p
 
 
 static func generate(rng: RandomNumberGenerator) -> Personality:
@@ -68,9 +91,10 @@ func descriptors(max_count: int = 3) -> PackedStringArray:
 ## Based on the traits that matter most in everyday company.
 func compatibility(other: Personality) -> float:
 	var diff := 0.0
-	for t in [&"sociability", &"aggressiveness", &"curiosity", &"industriousness", &"empathy"]:
+	var keys := [&"sociability", &"aggressiveness", &"curiosity", &"industriousness", &"empathy", &"patience", &"honesty"]
+	for t in keys:
 		diff += absf(get_trait(t) - other.get_trait(t))
-	return clampf(1.0 - diff / 5.0 * 2.2, 0.0, 1.0)
+	return clampf(1.0 - diff / keys.size() * 2.2, 0.0, 1.0)
 
 
 func to_dict() -> Dictionary:

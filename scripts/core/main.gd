@@ -15,6 +15,8 @@ var interaction: WorldInteraction
 var hud: Hud
 var day_night: DayNightCycle
 var world_seed: int = 0
+## Save data to apply on the next start (set by load_game / tests).
+static var pending_load: Dictionary = {}
 
 
 func _ready() -> void:
@@ -26,6 +28,12 @@ func _ready() -> void:
 	InputSetup.register()
 	SimClock.configure(config)
 
+	var loading := pending_load
+	pending_load = {}
+	if not loading.is_empty():
+		config = config.duplicate()
+		config.world_seed = int(loading["world_seed"])
+		config.social_seed = int(loading["social_seed"])
 	world_seed = config.world_seed if config.world_seed != 0 else int(Time.get_unix_time_from_system()) % 1000000
 	var rng := RandomNumberGenerator.new()
 	rng.seed = world_seed
@@ -62,7 +70,10 @@ func _ready() -> void:
 	if nav.access_region(tribe.center) != nav.main_region():
 		push_warning("Settlement is not in the largest walkable region.")
 
-	tribe.spawn_initial_villagers()
+	if loading.is_empty():
+		tribe.spawn_initial_villagers()
+	else:
+		SaveSystem.restore(self, loading)
 	SimClock.sim_tick.connect(tribe.sim_tick)
 
 	_setup_lighting()
@@ -81,15 +92,44 @@ func _ready() -> void:
 	hud.name = "Hud"
 	hud.setup(ctx, interaction, rts_camera)
 	add_child(hud)
-	EventBus.notify("%s has settled in the valley. Population: %d." % [tribe.tribe_name, tribe.population()])
+	if loading.is_empty():
+		EventBus.notify("%s has settled in the valley. Population: %d." % [tribe.tribe_name, tribe.population()])
+	else:
+		EventBus.notify("Game loaded: day %d, population %d." % [SimClock.get_day(), tribe.population()])
+
+
+func save_game() -> void:
+	if SaveSystem.save_game(self):
+		EventBus.notify("Game saved (day %d)." % SimClock.get_day())
+
+
+func load_game() -> void:
+	var data := SaveSystem.read()
+	if data.is_empty():
+		EventBus.notify("No saved game found.", &"warning")
+		return
+	pending_load = data
+	get_tree().reload_current_scene()
 
 
 func _exit_tree() -> void:
 	# Break RefCounted cycles (context <-> social systems) so nothing leaks on quit.
 	if ctx.social:
 		ctx.social.conversations.social = null
+		ctx.social.romance.social = null
+		ctx.social.promises.social = null
 		ctx.social.ctx = null
+	if ctx.society:
+		var s := ctx.society
+		for sub in [s.demographics, s.professions, s.tech, s.proposals, s.politics, s.groups, s.culture, s.economy]:
+			sub.society = null
+		if s.demographics:
+			s.demographics.ctx = null
+		if EventBus.social_event.is_connected(s._on_social_event):
+			EventBus.social_event.disconnect(s._on_social_event)
+		s.ctx = null
 	ctx.social = null
+	ctx.society = null
 
 
 func _setup_lighting() -> void:

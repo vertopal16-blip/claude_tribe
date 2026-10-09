@@ -54,6 +54,7 @@ func setup(context: WorldContext) -> void:
 	auto_build = ctx.config.auto_build_huts
 	planner = SettlementPlanner.new(self)
 	ctx.social = SocialSystem.new(ctx)
+	ctx.society = SocietySystem.new(ctx)
 	var c := ctx.terrain.settlement_center
 	center = ctx.terrain.snap_to_ground(Vector3(c.x, 0, c.y))
 	campfire = _spawn_building(BuildingCatalog.get_def(&"campfire"), center, true)
@@ -95,17 +96,24 @@ func spawn_initial_villagers() -> void:
 
 
 ## Single entry point for new tribe members (future: births, migrants).
-func add_villager(pos: Vector3, age: float) -> Villager:
-	var id := _next_villager_id
-	_next_villager_id += 1
+func add_villager(pos: Vector3, age: float, sex: StringName = &"", personality: Personality = null,
+		skills: VillagerSkills = null, parents: Array[int] = [], display_name: String = "", forced_id: int = -1) -> Villager:
+	var id := forced_id if forced_id > 0 else _next_villager_id
+	_next_villager_id = maxi(_next_villager_id, id + 1)
+	if sex == &"":
+		sex = &"female" if id % 2 == 1 else &"male"
+	if display_name == "":
+		display_name = NAMES[(id - 1) % NAMES.size()]
 	var v: Villager = VILLAGER_SCENE.instantiate()
-	v.setup(ctx, id, NAMES[(id - 1) % NAMES.size()], age, TUNICS[(id - 1) % TUNICS.size()],
-			HAIRS[ctx.rng.randi() % HAIRS.size()])
+	v.setup(ctx, id, display_name, age, TUNICS[(id - 1) % TUNICS.size()],
+			HAIRS[hash([ctx.world_seed, id]) % HAIRS.size()], sex, personality, skills)
+	v.parent_ids = parents.duplicate()
 	ctx.world_root.add_child(v)
 	v.place_at(ctx.terrain.snap_to_ground(pos))
 	v.died.connect(_on_villager_died)
 	villagers.append(v)
 	ctx.social.register_villager(v)
+	ctx.society.on_villager_added(v)
 	EventBus.villager_spawned.emit(v)
 	_emit_population()
 	return v
@@ -137,6 +145,7 @@ func sim_tick(dt: float) -> void:
 	var t2 := Time.get_ticks_usec()
 	_perf_add(&"villagers", t2 - t1)
 	ctx.social.tick(dt)
+	ctx.society.tick(dt)
 	var t3 := Time.get_ticks_usec()
 	_perf_add(&"social", t3 - t2)
 	planner.tick(dt)
@@ -199,7 +208,8 @@ func get_demand(type: int) -> float:
 		demand = 1.0
 	if type != ResourceType.FOOD and _construction_need[type] > stock:
 		demand = maxf(demand, 0.75)
-	demand = maxf(demand, 0.1)
+	# With full stores people have time for other things (company, exploring, crafts).
+	demand = maxf(demand, 0.05)
 	var goal: StringName = &"gather_food" if type == ResourceType.FOOD else (&"gather_wood" if type == ResourceType.WOOD else &"gather_stone")
 	var workers := int(_goal_counts.get(goal, 0))
 	return demand / (1.0 + workers * 0.35)
@@ -301,6 +311,9 @@ func planned_housing() -> int:
 
 
 func claim_bed(v: Villager) -> Building:
+	# Children sleep in their family's home.
+	if v.is_child() and v.home != null and is_instance_valid(v.home) and v.home.is_complete:
+		return v.home
 	if v.home != null and is_instance_valid(v.home) and v.home.is_complete and v.home.claim_bed(v):
 		return v.home
 	# A hut built for this villager: they get a bed even if a lodger must move out.
@@ -455,10 +468,10 @@ func cancel_construction(b: Building) -> void:
 	EventBus.notify("%s construction cancelled, materials returned" % b.def.display_name, &"build")
 
 
-func _spawn_building(def: BuildingDef, pos: Vector3, complete: bool) -> Building:
+func _spawn_building(def: BuildingDef, pos: Vector3, complete: bool, forced_id: int = -1) -> Building:
 	var b := Building.new()
 	b.setup(def, complete)
-	b.entity_id = ctx.allocate_entity_id()
+	b.entity_id = forced_id if forced_id > 0 else ctx.allocate_entity_id()
 	ctx.world_root.add_child(b)
 	# Sit on the lowest point of the footprint so nothing floats.
 	var y := ctx.terrain.height_at(pos.x, pos.z)
@@ -483,6 +496,7 @@ func _remove_building(b: Building) -> void:
 
 func _on_building_completed(b: Building) -> void:
 	ctx.social.on_building_completed(b)
+	ctx.society.on_building_completed(b)
 	EventBus.building_completed.emit(b)
 	EventBus.notify("A new %s has been completed!" % b.def.display_name.to_lower(), &"build")
 
@@ -500,6 +514,7 @@ func _on_villager_died(v: Villager, cause: String) -> void:
 	villagers.erase(v)
 	deaths += 1
 	ctx.social.on_villager_died(v)
+	ctx.society.on_villager_died(v, cause)
 	var grave := MeshInstance3D.new()
 	grave.mesh = MeshFactory.grave_marker()
 	ctx.world_root.add_child(grave)

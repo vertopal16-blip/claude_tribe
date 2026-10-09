@@ -14,6 +14,12 @@ const COLLISION_LAYER := 2  # bit 2 -> "villagers"
 var villager_id: int = 0
 var villager_name: String = "Villager"
 var age_years: float = 20.0
+## &"female" or &"male" (used by the reproduction model).
+var sex: StringName = &"female"
+## Parent villager ids (empty for founders).
+var parent_ids: Array[int] = []
+## Day of birth inside the simulation (founders: -1).
+var born_day: int = -1
 var tunic_color := Color(0.7, 0.3, 0.25)
 var hair_color := MeshFactory.C_HAIR
 
@@ -25,6 +31,20 @@ var movement: VillagerMovement
 var brain: VillagerBrain
 var personality: Personality
 var memory := VillagerMemory.new()
+var emotions := Emotions.new()
+var skills: VillagerSkills
+## Social standing (0..100): earned through skill, success, help and leadership.
+var prestige := 10.0
+## Emergent occupation (&"" until one develops), see ProfessionSystem.
+var profession: StringName = &""
+## Pregnancy progress in days (-1 = not pregnant), and the other parent.
+var pregnancy_days := -1.0
+var pregnancy_partner := -1
+var last_birth_day := -1000
+## Tools carried for work (durability in work-seconds left, 0 = none).
+var tool_durability := 0.0
+## Last things said and heard, for the inspector ("Aru -> Bela: ...").
+var conversation_log: Array[String] = []
 
 var state: int = VillagerState.IDLE
 var current_task: VillagerTask
@@ -49,8 +69,10 @@ var _bubble: Label3D
 var _bubble_time := 0.0
 
 
-func setup(context: WorldContext, id: int, display_name: String, age: float, tunic: Color, hair: Color) -> void:
+func setup(context: WorldContext, id: int, display_name: String, age: float, tunic: Color, hair: Color,
+		villager_sex: StringName = &"female", inherited: Personality = null, inherited_skills: VillagerSkills = null) -> void:
 	ctx = context
+	sex = villager_sex
 	villager_id = id
 	villager_name = display_name
 	age_years = age
@@ -62,12 +84,15 @@ func setup(context: WorldContext, id: int, display_name: String, age: float, tun
 	knowledge = VillagerKnowledge.new(self)
 	var prng := RandomNumberGenerator.new()
 	prng.seed = hash([ctx.social.social_seed() if ctx.social else ctx.world_seed, id, "personality"])
-	personality = Personality.generate(prng)
-	needs.social_rate_mult = lerpf(0.4, 1.8, personality.get_trait(&"sociability"))
+	personality = inherited if inherited != null else Personality.generate(prng)
+	needs.social_rate_mult = lerpf(0.4, 1.8, personality.get_trait(&"social_need"))
+	skills = inherited_skills if inherited_skills != null else VillagerSkills.generate(prng, age)
 	brain = VillagerBrain.new(self)
 	brain.add_modifier(HabitModifier.new())
 	brain.add_modifier(PersonalityModifier.new())
 	brain.add_modifier(SocialModifier.new())
+	brain.add_modifier(EmotionModifier.new())
+	brain.add_modifier(ProfessionModifier.new())
 
 
 func _ready() -> void:
@@ -80,6 +105,7 @@ func _ready() -> void:
 	_body = MeshInstance3D.new()
 	_body.mesh = MeshFactory.villager_body(tunic_color, hair_color)
 	_visual_root.add_child(_body)
+	update_age_visual()
 	_carry = MeshInstance3D.new()
 	_carry.position = Vector3(0, 1.05, 0.32)
 	_carry.visible = false
@@ -108,7 +134,10 @@ func sim_tick(dt: float) -> void:
 	if is_dead:
 		return
 	needs.tick(dt, activity, rest_multiplier)
+	var old_age := int(age_years)
 	age_years += dt / maxf(1.0, ctx.config.day_length_seconds * ctx.config.days_per_year)
+	if int(age_years) != old_age:
+		update_age_visual()
 	if needs.is_dead():
 		die("starvation" if needs.hunger >= 100.0 else "exhaustion")
 		return
@@ -166,6 +195,60 @@ func set_state(s: int) -> void:
 	state_changed.emit(self, s)
 
 
+# --------------------------------------------------------------------------
+# Life stages
+# --------------------------------------------------------------------------
+
+func life_stage() -> StringName:
+	var cfg := ctx.config
+	if age_years < cfg.youth_age:
+		return &"child"
+	if age_years < cfg.adult_age:
+		return &"youth"
+	if age_years < cfg.elder_age:
+		return &"adult"
+	return &"elder"
+
+
+func is_child() -> bool:
+	return age_years < ctx.config.youth_age
+
+
+func is_adult() -> bool:
+	return age_years >= ctx.config.adult_age
+
+
+## Children don't work; youths and elders work at reduced capacity.
+func work_capacity() -> float:
+	match life_stage():
+		&"child": return 0.0
+		&"youth": return 0.65
+		&"elder": return 0.75
+	return 1.0
+
+
+## Work speed for an activity: skill, tools, life stage, stress.
+func work_efficiency(skill: StringName) -> float:
+	var e := skills.efficiency(skill) * maxf(0.3, work_capacity()) * needs.performance()
+	if tool_durability > 0.0 and VillagerSkills.TOOL_SKILLS.has(skill):
+		e *= 1.35
+	e *= 1.0 - 0.25 * emotions.get_value(&"stress")
+	if ctx.society:
+		e *= ctx.society.groups.guild_bonus(self)
+	return e
+
+
+## Practising a skill: improves it and wears down tools.
+func practice(skill: StringName, seconds: float) -> void:
+	var before := int(skills.get_level(skill))
+	skills.practice(skill, seconds, personality)
+	if tool_durability > 0.0 and VillagerSkills.TOOL_SKILLS.has(skill):
+		tool_durability = maxf(0.0, tool_durability - seconds)
+	var after := int(skills.get_level(skill))
+	if ctx.society and before < VillagerSkills.MASTERY and after >= VillagerSkills.MASTERY:
+		ctx.society.on_skill_mastered(self, skill)
+
+
 func get_region() -> int:
 	return ctx.nav.access_region(global_position)
 
@@ -187,13 +270,35 @@ func record_event(event_name: StringName, data: Dictionary = {}) -> void:
 	EventBus.villager_event.emit(self, event_name, payload)
 
 
+## Children are smaller; hair greys in old age.
+func update_age_visual() -> void:
+	if _body == null:
+		return
+	var growth := clampf(age_years / ctx.config.adult_age, 0.0, 1.0)
+	_body.scale = Vector3.ONE * lerpf(0.5, 1.0, growth)
+	var hair := hair_color
+	if age_years >= ctx.config.elder_age:
+		hair = hair_color.lerp(Color(0.82, 0.82, 0.8), clampf((age_years - ctx.config.elder_age) / 12.0, 0.3, 1.0))
+		hair = Color(snappedf(hair.r, 0.1), snappedf(hair.g, 0.1), snappedf(hair.b, 0.1))
+	_body.mesh = MeshFactory.villager_body(tunic_color, hair)
+
+
 ## Speech bubble above the head (presentation only).
-func say(text: String, seconds: float = 3.5) -> void:
+func say(text: String, seconds: float = 3.5, color: Color = Color(1, 0.98, 0.9)) -> void:
 	if _bubble == null or text == "":
 		return
 	_bubble.text = text
+	_bubble.modulate = color
 	_bubble.visible = true
 	_bubble_time = seconds
+
+
+func remember_line(line: String, other_name: String) -> void:
+	if line == "":
+		return
+	conversation_log.append("to %s: \"%s\"" % [other_name, line])
+	if conversation_log.size() > 6:
+		conversation_log.pop_front()
 
 
 func die(cause: String) -> void:
@@ -250,6 +355,17 @@ func _animate(dt: float) -> void:
 		var s := sin(_anim_time * 9.0)
 		rot.x = -maxf(0.0, s) * 0.35
 		pos.y += maxf(0.0, -s) * 0.03
+	elif current_task is ConverseTask:
+		var st: StringName = (current_task as ConverseTask).style
+		if st == &"fight":
+			var f := sin(_anim_time * 14.0)
+			rot.x = -maxf(0.0, f) * 0.5
+			pos.y += absf(f) * 0.06
+		elif st == &"argue":
+			rot.z = sin(_anim_time * 7.0) * 0.08
+		elif st == &"romance":
+			rot.x = 0.08
+			pos.y += absf(sin(_anim_time * 2.0)) * 0.02
 	elif state == VillagerState.EATING:
 		rot.x = sin(_anim_time * 6.0) * 0.08 - 0.1
 	elif state == VillagerState.RESTING:

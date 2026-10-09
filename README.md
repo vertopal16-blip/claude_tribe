@@ -31,6 +31,10 @@ A new random valley is generated each run. Set `world_seed` in
 | H | Return camera to the camp |
 | B | Place a hut (Shift + click to place several) |
 | F | Follow the selected villager |
+| I | Detailed inspector for the selected villager (decision trace, emotions, family, relationships) |
+| C | Chronicle: the tribe's history |
+| T | Tribe panel: government, culture, groups, professions, knowledge, economy |
+| F5 / F9 | Quick save / quick load (`user://tribal_save.dat`) |
 | F3 | Performance overlay |
 
 ## What's in this milestone
@@ -64,22 +68,26 @@ scripts/
   autoload/   event_bus.gd     decoupled signals (UI, notifications, future memory system)
               sim_clock.gd     sim time, pause/speed, fixed sim_tick, time of day
   config/     game_config.gd   every tunable parameter (Resource -> config/default_config.tres)
-  core/       main.gd          bootstrap order; world_context.gd shared refs; input_setup.gd
+  core/       main.gd          bootstrap order; world_context.gd shared refs; input_setup.gd;
+              save_system.gd   full save/load
   world/      terrain.gd, nav_grid.gd (AStarGrid2D + obstacles + regions), world_generator.gd,
               resource_node.gd, resource_registry.gd, resource_type.gd, day_night_cycle.gd
   villager/   villager.gd (composition root) + villager_needs / _inventory / _movement /
               _brain / _state / _knowledge, decision_modifier.gd, habit_modifier.gd
               tasks/  villager_task.gd base + gather, eat, rest, build, deliver, idle,
-                      socialize, converse, explore, help, ask_food
+                      socialize, converse, explore, help, ask_food, farm, fish,
+                      craft, heal, ceremony, talk_to, work_site
   tribe/      tribe.gd (villagers, demand, housing), settlement_planner.gd, stockpile.gd
-  social/     social_system.gd, personality.gd, villager_memory.gd, memory_record.gd,
-              memory_policy.gd, relationship_graph.gd, knowledge_store.gd,
+  social/     social_system.gd, personality.gd, emotions.gd, villager_memory.gd,
+              memory_record.gd, memory_policy.gd, relationship_graph.gd, knowledge_store.gd,
               conversation_system.gd, conversation_outcome.gd, dialogue_renderer.gd,
-              personality_modifier.gd, social_modifier.gd
+              romance_system.gd, promise_book.gd, personality/social/emotion_modifier.gd
+  society/    society_system.gd (owner) + demographics, tech, skills, professions, economy,
+              proposals, politics, groups, culture, history_log
   buildings/  building_def.gd (data), building_catalog.gd, building.gd
   camera/     rts_camera.gd
   interaction/world_interaction.gd  raycast selection + placement ghost
-  ui/         hud.gd
+  ui/         hud.gd, society_panels.gd (inspector/chronicle/tribe), relationship_overlay.gd
   visuals/    mesh_factory.gd  procedural low-poly meshes, shared material, caching
 ```
 
@@ -113,16 +121,42 @@ Key design points:
   decoration, an integer flood fill for connectivity, bounded path smoothing, spatial-hash
   crowd separation. Counts and limits are in `GameConfig` (Performance group).
 
-## Social simulation
+## Social simulation and civilization
 
-Every villager has a personality (10 traits), a bounded memory, opinions of
-everyone else, and only the knowledge they have actually gained. They talk,
-share discoveries, gossip, argue, flirt, help each other in hard times and
-grieve their dead. Friendships, rivalries and couples emerge, homes are built
-for specific households, and the layout of the village follows who likes whom.
-Select a villager to see their personality, mood, relationships and memories.
+There is one tribe. Inside it, people with their own personalities, emotions,
+memories, skills and ambitions form friendships, rivalries, couples,
+households, families, work crews, guilds and factions. Nothing is scripted:
 
-Details, design and open points: [docs/SOCIAL_SIMULATION.md](docs/SOCIAL_SIMULATION.md).
+- **People:** 19 personality traits, which children inherit from their
+  parents. 18 emotions, each with a cause, intensity and decay. Memories fade
+  and are reinterpreted. Five-dimensional, non-reciprocal relationships
+  (affection, trust, respect, attraction, resentment) plus familiarity.
+- **Conversations:** around 25 intents with real consequences, such as
+  promises, teaching, gossip, accusations, fights, mediation, flirting,
+  proposals and debates over community projects. Any outcome is validated
+  against the world before it is applied.
+- **Romance and family:** attraction, then flirting, then courting, then a
+  proposal the other person can refuse. Couples share a home, can become
+  lifelong partners, get jealous and break up.
+- **Life cycle:** pregnancy and birth (biological sex, inherited traits and
+  aptitudes), childhood, youth, adulthood and old age, then natural death.
+  A year is 2 days, so generations turn over within a single session.
+- **Work and knowledge:** nine skills improve through practice, observation
+  and teaching, and decay with disuse. Five discoveries can spread through
+  the tribe or be lost. Professions emerge from what people actually do, and
+  guilds form once the tribe is big enough. Farms, workshops (tools), a
+  longhouse and a shrine are built.
+- **Society:** villagers propose community projects, which others support or
+  oppose for their own reasons, and which can fail. Leadership emerges and
+  changes, informally, through a chief, a hereditary line or a council. Disputes
+  lead to mediation. Culture norms and traditions drift and shape behaviour.
+  Tools can be held in common or privately. Everything is recorded in a
+  chronicle.
+
+Select a villager and press **I** to see why they did what they did.
+
+![Inspector](docs/screenshots/inspector.png)
+Details, test mapping and limitations: [docs/SOCIAL_SIMULATION.md](docs/SOCIAL_SIMULATION.md).
 
 ## Tests
 
@@ -138,6 +172,17 @@ godot --headless --path . res://tests/sim_test.tscn --fixed-fps 60 -- --seed=11 
 godot --headless --path . res://tests/sim_test.tscn --fixed-fps 60 -- --days=1.5 --extra-villagers=200     # perf
 godot --headless --path . res://tests/sim_test.tscn --fixed-fps 23 -- --seed=1234 --hash-at-tick=2400      # determinism: same hash at any fps
 godot --headless --path . res://tests/sim_test.tscn --fixed-fps 60 -- --days=4 --social-seed=7 --layout    # village layout per social seed
+```
+
+The society test runs the tribe on its own for N days, then checks what
+emerged and exercises each mechanism directly (requirements 1–17). It can also
+save and reload a game and verify the result:
+
+```bash
+godot --headless --path . res://tests/society_test.tscn --fixed-fps 60 -- --seed=42 --days=30 [--chronicle]
+godot --headless --path . res://tests/society_test.tscn --fixed-fps 60 -- --seed=42 --days=12 --save=/tmp/t.dat
+godot --headless --path . res://tests/society_test.tscn --fixed-fps 60 -- --seed=42 --load=/tmp/t.dat
+godot --headless --path . res://tests/sim_test.tscn --fixed-fps 60 -- --seed=42 --days=60 --history=400   # long run + chronicle
 ```
 
 Screenshots (needs a display or `xvfb-run`):

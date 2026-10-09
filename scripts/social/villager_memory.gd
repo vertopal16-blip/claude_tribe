@@ -77,6 +77,16 @@ func decay(dt_days: float) -> void:
 			long.remove_at(i)
 
 
+## Old memories drift towards how we feel about the people in them now: an
+## old quarrel with someone we have come to love feels less bitter.
+func reinterpret(opinion_of: Callable) -> void:
+	for r in long:
+		if r.other_id < 0:
+			continue
+		var now: float = opinion_of.call(r.other_id)
+		r.valence = clampf(lerpf(r.valence, now, 0.05), -1.0, 1.0)
+
+
 func size() -> int:
 	return short.size() + long.size()
 

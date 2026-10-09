@@ -7,6 +7,8 @@ const SAFETY_TIMEOUT := 15.0
 
 var partner: Villager
 var done := false
+## &"talk", &"warm", &"romance", &"argue", &"fight" - drives the animation.
+var style: StringName = &"talk"
 var _elapsed := 0.0
 
 

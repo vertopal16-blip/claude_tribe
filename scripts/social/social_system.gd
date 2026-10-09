@@ -18,6 +18,8 @@ const ADULT_AGE := 17.0
 var ctx: WorldContext
 var graph := RelationshipGraph.new()
 var conversations: ConversationSystem
+var romance: RomanceSystem
+var promises: PromiseBook
 var rng := RandomNumberGenerator.new()
 ## Counters for UI / tests.
 var stats := {"conversations": 0, "topics": {}, "friendships": 0, "rivalries": 0, "partnerships": 0,
@@ -35,6 +37,8 @@ func _init(context: WorldContext) -> void:
 	ctx = context
 	rng.seed = hash([social_seed(), "social"])
 	conversations = ConversationSystem.new(self)
+	romance = RomanceSystem.new(self)
+	promises = PromiseBook.new(self)
 
 
 ## Seed for everything social. Same world + different social seed = same
@@ -50,6 +54,7 @@ func social_seed() -> int:
 func register_villager(v: Villager) -> void:
 	_names[v.villager_id] = v.villager_name
 	_by_id[v.villager_id] = v
+	romance.register(v)
 
 
 func get_villager(id: int) -> Villager:
@@ -74,12 +79,14 @@ func setup_founders(villagers: Array[Villager]) -> void:
 		var tmp := order[i]
 		order[i] = order[j]
 		order[j] = tmp
-	var adults: Array[Villager] = order.filter(func(v): return v.age_years >= 18.0)
+	# Two founding couples (a woman and a man each, so they can raise children).
+	var women: Array[Villager] = order.filter(func(v): return v.age_years >= 18.0 and v.sex == &"female")
+	var men: Array[Villager] = order.filter(func(v): return v.age_years >= 18.0 and v.sex == &"male")
 	var couples: Array = []
 	var used := {}
-	while adults.size() >= 2 and couples.size() < 2:
-		var a: Villager = adults.pop_front()
-		var b: Villager = adults.pop_front()
+	while not women.is_empty() and not men.is_empty() and couples.size() < 2:
+		var a: Villager = women.pop_front()
+		var b: Villager = men.pop_front()
 		couples.append([a, b])
 		used[a.villager_id] = true
 		used[b.villager_id] = true
@@ -98,6 +105,9 @@ func setup_founders(villagers: Array[Villager]) -> void:
 			graph.add_familiarity(a.villager_id, b.villager_id, 0.15)  # added twice -> 0.3
 	for pair in couples:
 		_bond_founders(pair[0], pair[1], 0.75, 0.75, 0.85, &"partner")
+		graph.set_field(pair[0].villager_id, pair[1].villager_id, "attraction", 0.7)
+		graph.set_field(pair[1].villager_id, pair[0].villager_id, "attraction", 0.7)
+		romance.together_since[RelationshipGraph._bond_key(pair[0].villager_id, pair[1].villager_id)] = 1
 	for pair in siblings:
 		_bond_founders(pair[0], pair[1], 0.5, 0.68, 0.9, &"kin")
 	for v in villagers:
@@ -129,8 +139,16 @@ func founding_couples() -> Array:
 # Tick
 # --------------------------------------------------------------------------
 
+var _promise_timer := 0.0
+
+
 func tick(dt: float) -> void:
 	conversations.tick(dt)
+	romance.tick(dt)
+	_promise_timer += dt
+	if _promise_timer >= 30.0:
+		_promise_timer = 0.0
+		promises.check_due()
 	# Spread per-villager updates across 4 sub-phases of UPDATE_INTERVAL.
 	_phase_timer += dt
 	var step := UPDATE_INTERVAL / 4.0
@@ -147,9 +165,27 @@ func _update_villager(v: Villager) -> void:
 		return
 	if not v.is_hidden():
 		v.knowledge.perceive_if_needed()
-	v.memory.decay(UPDATE_INTERVAL / ctx.config.day_length_seconds)
+	var dt_days := UPDATE_INTERVAL / ctx.config.day_length_seconds
+	v.memory.decay(dt_days)
+	v.emotions.decay(dt_days)
+	var p := v.personality
+	# Ongoing circumstances feed emotions continuously.
+	v.emotions.values[&"loneliness"] = v.needs.social / 100.0
+	if v.needs.hunger > 70.0:
+		v.emotions.feel(&"stress", 0.04, "Going hungry", p)
+	if v.needs.energy < 15.0:
+		v.emotions.feel(&"stress", 0.03, "Exhausted", p)
+	if v.needs.health < 50.0:
+		v.emotions.feel(&"fear", 0.04, "Feeling unwell", p)
 	if v.needs.is_starving() and not v.memory.has_recent(&"starved", SimClock.sim_time - ctx.config.day_length_seconds):
 		remember(v, &"starved")
+	# Over time, memories are reinterpreted in the light of how we feel now,
+	# and grudges fade - faster for patient, caring, loyal people.
+	if (v.villager_id + int(SimClock.sim_time)) % 20 == 0:
+		v.memory.reinterpret(func(id): return graph.affinity(v.villager_id, id))
+		var forgiving := (p.get_trait(&"patience") + p.get_trait(&"empathy") + p.get_trait(&"loyalty")) / 3.0
+		var half_life_days := lerpf(14.0, 3.0, forgiving)
+		graph.fade_resentment(v.villager_id, pow(0.5, (20.0 / ctx.config.day_length_seconds) / half_life_days))
 
 
 # --------------------------------------------------------------------------
@@ -171,27 +207,58 @@ func remember(v: Villager, kind: StringName, other_id: int = -1, subject_id: int
 	r.detail = detail
 	r.valence = MemoryPolicy.valence(kind)
 	r.salience = MemoryPolicy.salience(kind)
+	# Everyone experiences things through their own temperament: the same
+	# argument stings an impatient person more than a patient one.
+	var p := v.personality
+	if r.valence < 0.0:
+		r.valence *= lerpf(1.3, 0.75, p.get_trait(&"patience"))
+	else:
+		r.valence *= lerpf(0.85, 1.15, p.get_trait(&"empathy"))
 	# Experiences with the people closest to us weigh more.
 	if other_id >= 0 and (graph.has_tag(v.villager_id, other_id, &"partner") or graph.is_kin(v.villager_id, other_id)):
 		r.salience = minf(1.0, r.salience * 1.3)
 	v.memory.remember(r)
 	stats.memories += 1
 
+	# Feelings: personality scales how strongly each one is felt.
+	var why := MemoryPolicy.describe(r, name_of)
+	for em in MemoryPolicy.EMOTIONS.get(kind, []):
+		v.emotions.feel(em[0], em[1], why, p)
+
 	if other_id >= 0 and other_id != v.villager_id:
-		var p := v.personality
 		var d_aff := MemoryPolicy.affinity_delta(kind)
 		var d_trust := MemoryPolicy.trust_delta(kind)
 		# Caring people warm up faster; suspicious people hold grudges.
 		d_aff *= lerpf(0.7, 1.3, p.get_trait(&"empathy")) if d_aff > 0.0 else lerpf(1.3, 0.8, p.get_trait(&"trust"))
 		d_trust *= lerpf(0.7, 1.2, p.get_trait(&"trust")) if d_trust > 0.0 else lerpf(1.3, 0.8, p.get_trait(&"trust"))
 		graph.adjust_opinion(v.villager_id, other_id, d_aff, d_trust)
+		# Hurt turns into lasting resentment; kindness slowly heals it.
+		if d_aff < 0.0:
+			graph.adjust_field(v.villager_id, other_id, "resentment", -d_aff * 0.6 * lerpf(1.2, 0.6, p.get_trait(&"patience")))
+		else:
+			graph.adjust_field(v.villager_id, other_id, "resentment", -d_aff * 0.5)
+		if RESPECT.has(kind):
+			graph.adjust_field(v.villager_id, other_id, "respect", RESPECT[kind])
 		graph.add_familiarity(v.villager_id, other_id, 0.02)
 		_update_bond(v.villager_id, other_id)
+		if r.valence > 0.1 and kind in [&"chatted", &"worked_together", &"built_together", &"was_helped", &"was_comforted", &"reconciled"]:
+			var other := get_villager(other_id)
+			if other != null:
+				romance.on_good_time(v, other)
 
 	for drift in MemoryPolicy.TRAIT_DRIFT.get(kind, []):
 		v.personality.drift(drift[0], drift[1])
 	EventBus.social_event.emit(v, kind, r.to_dict())
 	return r
+
+
+## How experiences change respect for the other person involved.
+const RESPECT := {
+	&"was_helped": 0.1, &"was_taught": 0.15, &"learned_discovery": 0.1, &"mediated": 0.15,
+	&"persuaded": 0.06, &"fought": -0.05, &"misled": -0.1, &"was_refused": -0.05,
+	&"accused": -0.05, &"humiliated": -0.15, &"promise_kept": 0.1, &"got_tool": 0.05,
+	&"worked_together": 0.02, &"built_together": 0.04,
+}
 
 
 func _update_bond(a: int, b: int) -> void:
@@ -372,12 +439,16 @@ func to_dict() -> Dictionary:
 	var names := {}
 	for id in _names:
 		names[str(id)] = _names[id]
-	return {"graph": graph.to_dict(), "people": people, "names": names, "dead": _dead.keys()}
+	return {"graph": graph.to_dict(), "people": people, "names": names, "dead": _dead.keys(),
+		"romance": romance.to_dict(), "promises": promises.to_dict(), "stats": stats.duplicate(true)}
 
 
 ## Restores social state onto the current (living) villagers by id.
 func load_dict(d: Dictionary) -> void:
 	graph = RelationshipGraph.from_dict(d["graph"])
+	romance.load_dict(d["romance"])
+	promises.load_dict(d["promises"])
+	stats = Dictionary(d["stats"]).duplicate(true)
 	for id in d["names"]:
 		_names[int(id)] = d["names"][id]
 	_dead.clear()

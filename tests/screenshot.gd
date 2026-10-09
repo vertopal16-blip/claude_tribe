@@ -35,6 +35,9 @@ func _ready() -> void:
 		["evening", 0.76, 40.0, 60.0, Vector3.ZERO, false],
 		["night", 0.95, 30.0, 60.0, Vector3.ZERO, false],
 		["placement", 1.30, 30.0, 10.0, Vector3(8, 0, -10), false],
+		["inspector", 3.4, 18.0, 30.0, Vector3.ZERO, true],
+		["tribe_panel", 3.6, 40.0, 60.0, Vector3.ZERO, false],
+		["chronicle", 3.8, 40.0, 60.0, Vector3.ZERO, false],
 	]
 
 
@@ -70,6 +73,15 @@ func _process(_delta: float) -> void:
 			main.interaction.select(main.tribe.villagers[0])
 		else:
 			main.interaction.select(null)
+		main.interaction.cancel_placement()
+		var panels: SocietyPanels = main.hud.panels
+		panels.inspect_mode = false
+		panels._chronicle.visible = false
+		panels._tribe.visible = false
+		match shot[0]:
+			"inspector": panels.toggle_inspect()
+			"tribe_panel": panels.toggle_tribe()
+			"chronicle": panels.toggle_chronicle()
 		if shot[0] == "placement":
 			main.interaction.begin_placement(BuildingCatalog.get_def(&"hut"))
 			Input.warp_mouse(get_viewport().get_visible_rect().size * 0.5)

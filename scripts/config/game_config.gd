@@ -48,7 +48,8 @@ extends Resource
 ## Maximum distance from the campfire at which buildings may be placed.
 @export var settlement_build_radius: float = 40.0
 @export var auto_build_huts: bool = true
-@export var days_per_year: float = 8.0
+## Sim-days per year of age. Low on purpose so generations pass in a session.
+@export var days_per_year: float = 2.0
 
 @export_group("Villager")
 @export var move_speed: float = 3.4
@@ -74,6 +75,21 @@ extends Resource
 @export var social_seed: int = 0
 ## Loneliness gained per sim-second for an average villager (0..100 scale).
 @export var loneliness_rate: float = 0.24
+
+@export_group("Demographics")
+@export var youth_age: float = 12.0
+@export var adult_age: float = 16.0
+@export var elder_age: float = 55.0
+@export var fertile_min_age: float = 17.0
+@export var fertile_max_age: float = 42.0
+## Days from conception to birth.
+@export var pregnancy_days: float = 3.0
+## Minimum days between births for one mother.
+@export var birth_spacing_days: float = 5.0
+## Daily chance of conception for an eligible, well-off couple.
+@export var conception_chance: float = 0.35
+## Hard safety cap; births normally stop far earlier for lack of food/homes.
+@export var max_population: int = 80
 
 @export_group("Simulation")
 @export var sim_tick_interval: float = 0.25

@@ -18,6 +18,9 @@ signal villager_event(villager: Node, event_name: StringName, data: Dictionary)
 signal social_event(villager: Node, kind: StringName, record: Dictionary)
 ## A conversation completed and its (validated) outcome was applied.
 signal conversation_finished(outcome: Dictionary)
+## A new entry in the tribe's chronicle.
+signal history_added(entry: Dictionary)
+signal villager_born(villager: Node)
 signal building_placed(building: Node)
 signal building_completed(building: Node)
 signal building_removed(building: Node)

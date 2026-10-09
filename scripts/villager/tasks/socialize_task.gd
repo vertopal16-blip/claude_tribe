@@ -39,6 +39,17 @@ func _pick_target() -> Villager:
 		if d > SEARCH_RADIUS:
 			continue
 		var score := social.closeness(villager.villager_id, o.villager_id) - d * 0.01
+		if social.romance.is_interested(villager, o):
+			# Someone free is worth seeking out; someone taken, only from afar.
+			var free := 1.0 if social.romance.is_single(o.villager_id) or social.partner_of(villager.villager_id) == o.villager_id else 0.25
+			score += social.romance.attraction(villager, o) * (0.4 + villager.personality.get_trait(&"courage") * 0.6) * free
+			# Single people looking for a mate seek out others who are free,
+			# the more so the longer they have been alone.
+			if social.romance.is_single(villager.villager_id) and social.romance.is_single(o.villager_id):
+				score += 0.25 + 0.5 * social.romance.longing(villager)
+		score += social.ctx.society.groups.alignment(villager.villager_id, o.villager_id) * 0.15
+		# Mood of the moment: people don't always seek out the same friend.
+		score += social.rng.randf() * 0.3
 		if score > best_score:
 			best_score = score
 			best = o

@@ -10,6 +10,13 @@ var _walking := false
 func start() -> bool:
 	villager.set_state(VillagerState.IDLE)
 	var center := ctx.tribe.campfire.global_position
+	# Children play close to a parent (or home).
+	if villager.is_child():
+		for pid in villager.parent_ids:
+			var parent := ctx.social.get_villager(pid)
+			if parent != null and not parent.is_hidden():
+				center = parent.global_position
+				break
 	var a := ctx.rng.randf() * TAU
 	var r := ctx.rng.randf_range(3.0, 7.0)
 	var target := center + Vector3(cos(a) * r, 0, sin(a) * r)
@@ -32,4 +39,6 @@ func _on_finish() -> void:
 
 
 func describe() -> String:
+	if villager.is_child():
+		return "Playing"
 	return "Wandering around the camp" if _walking else "Idle"

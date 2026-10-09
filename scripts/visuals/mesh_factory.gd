@@ -566,6 +566,97 @@ static func grave_marker() -> ArrayMesh:
 	return mesh
 
 
+static func farm_field(radius: float) -> ArrayMesh:
+	var key := "farm_%.2f" % radius
+	if _cache.has(key):
+		return _cache[key]
+	var st := _begin()
+	var w := radius * 1.6
+	add_box(st, Vector3(0, 0.04, 0), Vector3(w, 0.08, w), Color(0.42, 0.3, 0.19))
+	for i in 5:
+		var z := -w * 0.4 + i * w * 0.2
+		add_box(st, Vector3(0, 0.1, z), Vector3(w * 0.9, 0.1, 0.25), Color(0.35, 0.24, 0.15))
+	# Fence posts
+	for x in [-w * 0.5, w * 0.5]:
+		for z in [-w * 0.5, 0.0, w * 0.5]:
+			add_prism(st, Vector3(x, 0, z), 4, 0.06, 0.05, 0.0, 0.7, C_WOOD, null, true)
+	var mesh := _commit(st)
+	_cache[key] = mesh
+	return mesh
+
+
+## Crop rows; scaled vertically by growth.
+static func crops(radius: float) -> ArrayMesh:
+	var key := "crops_%.2f" % radius
+	if _cache.has(key):
+		return _cache[key]
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 9100
+	var st := _begin()
+	var w := radius * 1.6
+	for i in 5:
+		var z := -w * 0.4 + i * w * 0.2
+		for j in 7:
+			var x := -w * 0.4 + j * w * 0.8 / 6.0
+			add_prism(st, Vector3(x, 0.1, z), 4, 0.12, 0.0, 0.0, 0.8, Color(0.55, 0.7, 0.25).lerp(Color(0.85, 0.75, 0.3), rng.randf() * 0.5), rng, false)
+	var mesh := _commit(st)
+	_cache[key] = mesh
+	return mesh
+
+
+static func workshop() -> ArrayMesh:
+	if _cache.has("workshop"):
+		return _cache["workshop"]
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 9200
+	var st := _begin()
+	for x in [-1.6, 1.6]:
+		for z in [-1.2, 1.2]:
+			add_prism(st, Vector3(x, 0, z), 4, 0.12, 0.1, 0.0, 2.0, C_TRUNK_DARK, null, true)
+	add_box(st, Vector3(0, 2.15, 0), Vector3(3.8, 0.12, 3.0), C_STRAW_DARK, Basis(Vector3.RIGHT, 0.12))
+	add_box(st, Vector3(-0.5, 0.45, 0), Vector3(1.4, 0.9, 0.8), C_WOOD)  # workbench
+	add_blob(st, Vector3(0.9, 0.35, 0.3), Vector3(0.45, 0.35, 0.4), C_ROCK, rng, 0.15, false)  # anvil stone
+	add_box(st, Vector3(1.3, 0.3, -0.8), Vector3(0.6, 0.6, 0.6), C_WOOD.darkened(0.2))
+	var mesh := _commit(st)
+	_cache["workshop"] = mesh
+	return mesh
+
+
+static func longhouse() -> ArrayMesh:
+	if _cache.has("longhouse"):
+		return _cache["longhouse"]
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 9300
+	var st := _begin()
+	add_box(st, Vector3(0, 0.75, 0), Vector3(6.0, 1.5, 3.2), C_WALL)
+	# Pitched roof made of two slanted boxes
+	add_box(st, Vector3(0, 2.0, -0.85), Vector3(6.6, 0.18, 2.2), C_STRAW, Basis(Vector3.RIGHT, 0.6))
+	add_box(st, Vector3(0, 2.0, 0.85), Vector3(6.6, 0.18, 2.2), C_STRAW, Basis(Vector3.RIGHT, -0.6))
+	add_box(st, Vector3(0, 0.6, 1.62), Vector3(1.0, 1.2, 0.1), Color(0.24, 0.16, 0.1))
+	for x in [-2.8, 2.8]:
+		add_prism(st, Vector3(x, 0, 1.7), 4, 0.1, 0.08, 0.0, 2.6, C_TRUNK_DARK, null, true)
+	var mesh := _commit(st)
+	_cache["longhouse"] = mesh
+	return mesh
+
+
+static func shrine() -> ArrayMesh:
+	if _cache.has("shrine"):
+		return _cache["shrine"]
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 9400
+	var st := _begin()
+	for i in 7:
+		var a := TAU * i / 7.0
+		add_box(st, Vector3(cos(a) * 1.6, 0.6, sin(a) * 1.6), Vector3(0.4, 1.2 + rng.randf() * 0.5, 0.3), C_ROCK.lightened(rng.randf() * 0.1),
+				Basis(Vector3.UP, -a))
+	add_prism(st, Vector3.ZERO, 6, 0.25, 0.18, 0.0, 2.6, C_TRUNK, rng, true)  # totem
+	add_blob(st, Vector3(0, 2.7, 0), Vector3(0.35, 0.3, 0.35), Color(0.75, 0.3, 0.2), rng, 0.1, false)
+	var mesh := _commit(st)
+	_cache["shrine"] = mesh
+	return mesh
+
+
 ## Flat ring used for selection / hover feedback.
 static func ring(radius: float, width: float = 0.12, segments: int = 32) -> ArrayMesh:
 	var key := "ring_%.2f_%.2f" % [radius, width]

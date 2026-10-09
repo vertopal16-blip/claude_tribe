@@ -14,6 +14,7 @@ var _is_builder := false
 
 
 func start() -> bool:
+	ctx.society.economy.equip(villager)
 	var job := ctx.tribe.find_build_job(villager)
 	if job.is_empty():
 		return false
@@ -83,6 +84,7 @@ func tick(dt: float) -> int:
 				VillagerMovement.ARRIVED:
 					var carried := villager.inventory.amount
 					var used := site.complete_delivery(material_type, carried, villager.villager_id)
+					ctx.social.promises.on_contribution(villager.villager_id, site.entity_id)
 					villager.inventory.remove(used)
 					_reserved_amount = 0
 					villager.record_event(&"delivered_materials", {"building_id": site.entity_id,
@@ -105,7 +107,9 @@ func tick(dt: float) -> int:
 			villager.activity = 1.0
 			if site.is_complete:
 				return Status.SUCCEEDED
-			if site.add_work(ctx.config.build_rate * villager.needs.performance() * dt, villager.villager_id):
+			villager.practice(&"building", dt)
+			ctx.social.promises.on_contribution(villager.villager_id, site.entity_id)
+			if site.add_work(ctx.config.build_rate * villager.work_efficiency(&"building") * dt, villager.villager_id):
 				villager.record_event(&"completed_building", {"building_id": site.entity_id, "building_type": site.def.id})
 				return Status.SUCCEEDED
 	return Status.RUNNING

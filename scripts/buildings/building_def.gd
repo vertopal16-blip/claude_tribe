@@ -18,6 +18,12 @@ extends Resource
 @export var is_campfire: bool = false
 @export var player_buildable: bool = false
 @export var max_builders: int = 3
+## Technology someone must know before this can be proposed and built.
+@export var required_tech: StringName = &""
+## Minimum population before anyone sees a need for it.
+@export var min_population: int = 0
+## Which skill its work trains (farm -> farming, workshop -> toolmaking...).
+@export var work_skill: StringName = &""
 
 
 func total_cost() -> int:

@@ -84,7 +84,8 @@ func pick_homeless() -> Villager:
 	var best: Villager = null
 	var best_score := -INF
 	for v in tribe.villagers:
-		if v.is_dead or _has_home(v):
+		# Children live with their parents; only adults set up a household.
+		if v.is_dead or not v.is_adult() or _has_home(v):
 			continue
 		var partner := tribe.ctx.social.get_villager(tribe.ctx.social.partner_of(v.villager_id))
 		if partner != null and _has_home(partner):

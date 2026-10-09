@@ -86,7 +86,8 @@ func _consume() -> int:
 		Source.INVENTORY:
 			got = villager.inventory.remove(wanted)
 		Source.STOCKPILE:
-			got = ctx.tribe.stockpile.take(ResourceType.FOOD, wanted)
+			# Strict rationing (a tradition some tribes develop) caps each share.
+			got = ctx.tribe.stockpile.take(ResourceType.FOOD, mini(wanted, ctx.society.culture.ration_limit()))
 		Source.BUSH:
 			if is_instance_valid(bush):
 				got = bush.harvest(wanted)

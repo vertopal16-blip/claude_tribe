@@ -34,6 +34,8 @@ var hash_at_tick := 0
 var social_seed := 0
 ## Print where homes ended up (compare runs with different social seeds).
 var print_layout := false
+## Chronicle lines to print at the end.
+var history_lines := 0
 
 
 func _ready() -> void:
@@ -54,6 +56,8 @@ func _ready() -> void:
 			social_seed = int(arg.split("=")[1])
 		elif arg == "--layout":
 			print_layout = true
+		elif arg.begins_with("--history="):
+			history_lines = int(arg.split("=")[1])
 	# Headless windows default to 64x64, where the HUD would cover everything.
 	get_tree().root.size = Vector2i(1600, 900)
 	var cfg: GameConfig = load("res://config/default_config.tres").duplicate()
@@ -161,6 +165,7 @@ func _process(delta: float) -> void:
 					_social_checks()
 				if print_layout:
 					_print_layout()
+				_society_report()
 				phase = "done"
 				print("[test] RESULT: %s (%d failures)" % ["OK" if failures.is_empty() else "FAILED", failures.size()])
 				for f in failures:
@@ -536,6 +541,7 @@ func _social_checks() -> void:
 	giver.inventory.add(ResourceType.FOOD, 5)
 	social.graph.set_opinion(gid, nid, 0.6, 0.6)
 	check(social.find_person_to_help(giver) == needy, "A starving friend is noticed by someone carrying food")
+	social.graph.set_opinion(nid, gid, 0.0, 0.5)
 	var aff_before := social.graph.affinity(nid, gid)
 	var offer := social.conversations.decide(giver, needy, &"offer_food")
 	check(offer.validate(social), "Food offer validates")
@@ -556,7 +562,8 @@ func _social_checks() -> void:
 
 
 func _on_tick_for_hash(_dt: float) -> void:
-	if SimClock.tick_count != hash_at_tick:
+	var every := OS.get_cmdline_user_args().has("--hash-every")
+	if SimClock.tick_count != hash_at_tick and not (every and SimClock.tick_count % 5 == 0 and SimClock.tick_count > hash_at_tick - 80):
 		return
 	var parts: PackedStringArray = []
 	for v in main.tribe.villagers:
@@ -565,8 +572,14 @@ func _on_tick_for_hash(_dt: float) -> void:
 			v.current_task.goal_id if v.current_task else "-"])
 	parts.append(str(main.tribe.stockpile.amounts()))
 	parts.append(var_to_str(main.ctx.social.to_dict()))
-	print("[test] STATE_HASH tick=%d hash=%d" % [hash_at_tick, "|".join(parts).hash()])
-	get_tree().quit(0)
+	print("[test] STATE_HASH tick=%d hash=%d" % [SimClock.tick_count, "|".join(parts).hash()])
+	for arg in OS.get_cmdline_user_args():
+		if arg.begins_with("--hash-dump="):
+			var f := FileAccess.open(arg.split("=")[1], FileAccess.WRITE)
+			f.store_string("\n".join(parts) + "\n" + var_to_str(main.ctx.society.to_dict()))
+			f.close()
+	if SimClock.tick_count >= hash_at_tick:
+		get_tree().quit(0)
 
 
 func _print_layout() -> void:
@@ -583,3 +596,62 @@ func _scarce_checks() -> void:
 	print("[test] social stats: %s  deaths=%d" % [str(st), stats.deaths])
 	check(st.conversations > 0, "Villagers still talk during scarcity")
 	check(main.tribe.population() >= 6, "Most of the tribe survives scarcity (pop %d)" % main.tribe.population())
+
+
+func _society_report() -> void:
+	var soc := main.ctx.society
+	var social := main.ctx.social
+	print("[report] population=%d births=%d natural_deaths=%d deaths_total=%d" % [main.tribe.population(),
+			soc.demographics.births, soc.demographics.natural_deaths, stats.deaths])
+	print("[report] couples formed=%d breakups=%d current couples=%d" % [social.romance.couples_formed, social.romance.breakups,
+			_current_couples()])
+	print("[report] professions=%s" % str(soc.professions.known_professions.keys()))
+	print("[report] discoveries=%s lost=%s" % [str(soc.tech.discovered.keys()), str(soc.tech.lost.keys())])
+	print("[report] government=%s transitions=%d mediations=%d" % [soc.politics.government_label(), soc.politics.transitions, soc.politics.mediations])
+	var gnames := []
+	for g in soc.groups.groups.values():
+		gnames.append("%s(%d)" % [g["name"], g["members"].size()])
+	print("[report] groups=%s rivalries=%d" % [str(gnames), soc.groups.rivalries.size()])
+	print("[report] culture=%s traditions=%s" % [soc.culture.describe(), str(soc.culture.tradition_names())])
+	print("[report] proposals: completed=%d failed=%d open=%d  tools made=%d mode=%s" % [soc.proposals.completed, soc.proposals.failed,
+			soc.proposals.open_count(), soc.economy.tools_made, soc.economy.mode_label()])
+	var buildings := {}
+	for b in main.tribe.buildings:
+		buildings[String(b.def.id)] = int(buildings.get(String(b.def.id), 0)) + 1
+	print("[report] buildings=%s" % str(buildings))
+	print("[report] history counts=%s" % str(soc.history.counts))
+	print("[report] topics=%s" % str(social.stats.topics))
+	print("[report] promises kept=%d broken=%d" % [social.promises.kept, social.promises.broken])
+	if OS.get_cmdline_user_args().has("--romance"):
+		_romance_debug()
+	for e in soc.history.entries.slice(maxi(0, soc.history.entries.size() - history_lines)):
+		print("  [day %d] %s" % [e["day"], e["text"]])
+
+
+func _romance_debug() -> void:
+	var social := main.ctx.social
+	var r := social.romance
+	for a in main.tribe.villagers:
+		if not r.eligible(a):
+			continue
+		var line := "%s(%s,%d,%s,partner=%s):" % [a.villager_name, a.sex, int(a.age_years), r.orientation.get(a.villager_id),
+				social.name_of(social.partner_of(a.villager_id))]
+		for b in main.tribe.villagers:
+			if b == a or not r.eligible(b):
+				continue
+			var at := social.graph.attraction(a.villager_id, b.villager_id)
+			if at > 0.0:
+				var flirts := 0
+				for m in a.memory.about(b.villager_id):
+					if m.kind == &"flirted":
+						flirts += m.count
+				line += " %s=%.2f/f%d%s" % [b.villager_name, at, flirts, "C" if social.graph.has_tag(a.villager_id, b.villager_id, &"courting") else ""]
+		print("[romance] " + line)
+
+
+func _current_couples() -> int:
+	var n := 0
+	for v in main.tribe.villagers:
+		if main.ctx.social.partner_of(v.villager_id) > v.villager_id:
+			n += 1
+	return n

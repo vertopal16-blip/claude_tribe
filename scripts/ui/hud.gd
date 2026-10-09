@@ -43,6 +43,10 @@ var _sel_cancel: Button
 var _selected: Node3D
 var _refresh_timer := 0.0
 var _debug_label: Label
+var panels: SocietyPanels
+var _inspect_button: Button
+var _chronicle_button: Button
+var _tribe_button: Button
 
 
 func setup(context: WorldContext, world_interaction: WorldInteraction, cam: RtsCamera) -> void:
@@ -68,6 +72,12 @@ func _ready() -> void:
 	_build_construction_panel()
 	_build_help_hint()
 	_build_debug_overlay()
+	panels = SocietyPanels.new()
+	panels.setup(ctx, interaction, _theme)
+	_root.add_child(panels)
+	var overlay := RelationshipOverlay.new()
+	overlay.setup(ctx, interaction, panels)
+	ctx.world_root.add_child(overlay)
 
 	EventBus.stockpile_changed.connect(func(_a): _refresh_resources())
 	EventBus.population_changed.connect(func(_c): _refresh_resources())
@@ -187,6 +197,7 @@ func _build_top_bar() -> void:
 	_add_stat(row, &"food", "Food", ResourceType.color(ResourceType.FOOD))
 	_add_stat(row, &"wood", "Wood", ResourceType.color(ResourceType.WOOD))
 	_add_stat(row, &"stone", "Stone", ResourceType.color(ResourceType.STONE))
+	_add_stat(row, &"tools", "Tools", ResourceType.color(ResourceType.TOOLS))
 	_add_stat(row, &"housing", "Beds", Color(0.85, 0.71, 0.40))
 	_anchor(panel, Control.PRESET_TOP_LEFT, 12)
 
@@ -211,6 +222,7 @@ func _refresh_resources() -> void:
 	_value_labels[&"food"].text = str(s.get_amount(ResourceType.FOOD))
 	_value_labels[&"wood"].text = str(s.get_amount(ResourceType.WOOD))
 	_value_labels[&"stone"].text = str(s.get_amount(ResourceType.STONE))
+	_value_labels[&"tools"].text = str(s.get_amount(ResourceType.TOOLS))
 	_value_labels[&"housing"].text = "%d/%d" % [ctx.tribe.housing_capacity(), ctx.tribe.population()]
 
 
@@ -243,7 +255,22 @@ func _build_time_panel() -> void:
 		speed_row.add_child(b)
 	col.add_child(speed_row)
 	col.add_child(_button("Return to camp", _focus_home, "Center the camera on the settlement (H)"))
+	var view_row := HBoxContainer.new()
+	view_row.add_theme_constant_override("separation", 4)
+	_chronicle_button = _button("Chronicle", func(): panels.toggle_chronicle(); _refresh_view_buttons(), "Tribe history (C)")
+	_tribe_button = _button("Tribe", func(): panels.toggle_tribe(); _refresh_view_buttons(), "Government, culture, groups (T)")
+	_inspect_button = _button("Inspect", func(): panels.toggle_inspect(); _refresh_view_buttons(), "Detailed villager inspector (I)")
+	for b in [_chronicle_button, _tribe_button, _inspect_button]:
+		b.toggle_mode = true
+		view_row.add_child(b)
+	col.add_child(view_row)
 	_anchor(panel, Control.PRESET_TOP_RIGHT, 12)
+
+
+func _refresh_view_buttons() -> void:
+	_chronicle_button.set_pressed_no_signal(panels.is_chronicle_open())
+	_tribe_button.set_pressed_no_signal(panels.is_tribe_open())
+	_inspect_button.set_pressed_no_signal(panels.inspect_mode)
 
 
 func _set_speed(value: float) -> void:
@@ -402,7 +429,8 @@ func _refresh_selection() -> void:
 	if _selected is Villager:
 		var v := _selected as Villager
 		_sel_title.text = v.villager_name
-		_sel_subtitle.text = "Villager #%d  ·  %d years old" % [v.villager_id, int(v.age_years)]
+		_sel_subtitle.text = "%s, %d years (%s)%s%s" % ["Woman" if v.sex == &"female" else "Man", int(v.age_years), v.life_stage(),
+				"  ·  " + String(v.profession) if v.profession != &"" else "", "  ·  expecting a child" if v.pregnancy_days >= 0.0 else ""]
 		_set_bar(&"health", true, v.needs.health)
 		_set_bar(&"satiety", true, 100.0 - v.needs.hunger)
 		_set_bar(&"energy", true, v.needs.energy)
@@ -451,10 +479,12 @@ func _names(ids: Array) -> String:
 func _social_summary(v: Villager) -> String:
 	var social := ctx.social
 	var id := v.villager_id
-	var mood := v.memory.mood()
 	var lines: PackedStringArray = []
 	lines.append("Personality: " + "  ·  ".join(v.personality.descriptors()))
-	lines.append("Mood: %s" % SocialSystem.mood_label(mood))
+	var feelings: PackedStringArray = []
+	for pair in v.emotions.dominant(3):
+		feelings.append(String(pair[0]))
+	lines.append("Mood: %s%s" % [SocialSystem.mood_label(v.emotions.mood()), ("  (" + ", ".join(feelings) + ")") if not feelings.is_empty() else ""])
 	var partner := social.partner_of(id)
 	var family := social.kin_of(id)
 	var rel := "Partner: %s" % (social.name_of(partner) if partner >= 0 else "none")
@@ -530,7 +560,7 @@ func _on_placement_mode_changed(active: bool, def: BuildingDef) -> void:
 
 
 func _build_help_hint() -> void:
-	var l := _label("WASD move  ·  Wheel zoom  ·  Middle mouse / Q E rotate  ·  Left click select  ·  Space pause  ·  1-4 speed  ·  H camp  ·  F3 stats", 12, Color(1, 1, 1, 0.55))
+	var l := _label("WASD move  ·  Wheel zoom  ·  Middle mouse / Q E rotate  ·  Left click select  ·  Space pause  ·  1-4 speed  ·  H camp  ·  I inspect  ·  C chronicle  ·  T tribe", 12, Color(1, 1, 1, 0.55))
 	_anchor(l, Control.PRESET_CENTER_BOTTOM, 10)
 
 
@@ -586,6 +616,23 @@ func _unhandled_input(event: InputEvent) -> void:
 		_focus_home()
 	elif event.is_action_pressed(&"build_hut"):
 		_start_placing(BuildingCatalog.get_def(&"hut"))
+	elif event.is_action_pressed(&"quick_save"):
+		var main := get_parent() as Main
+		if main:
+			main.save_game()
+	elif event.is_action_pressed(&"quick_load"):
+		var main := get_parent() as Main
+		if main:
+			main.load_game()
+	elif event.is_action_pressed(&"toggle_inspect"):
+		panels.toggle_inspect()
+		_refresh_view_buttons()
+	elif event.is_action_pressed(&"toggle_chronicle"):
+		panels.toggle_chronicle()
+		_refresh_view_buttons()
+	elif event.is_action_pressed(&"toggle_tribe"):
+		panels.toggle_tribe()
+		_refresh_view_buttons()
 	elif event.is_action_pressed(&"toggle_debug"):
 		var panel := _debug_label.get_parent() as Control
 		panel.visible = not panel.visible

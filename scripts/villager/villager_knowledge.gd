@@ -51,6 +51,11 @@ func verify(maybe_node) -> void:
 	if maybe_node == null or not is_instance_valid(maybe_node):
 		return
 	var node := maybe_node as ResourceNode
+	# A used-up node may still exist until the end of the frame. Treat it as
+	# gone already, or results would depend on how many ticks share a frame.
+	if node.is_queued_for_deletion() or villager.ctx.resources.get_by_id(node.entity_id) == null:
+		store.forget(node.entity_id)
+		return
 	var fact = store.get_fact(node.entity_id)
 	var told_by := -1 if fact == null else int(fact["source"])
 	var told_amount := 0 if fact == null else int(fact["amount"])

@@ -21,6 +21,14 @@ var sleepers: Array[Node] = []
 var owner_ids: Array[int] = []
 ## Villagers who delivered materials or worked on construction.
 var contributor_ids: Array[int] = []
+## Community project this building came from (-1 if none), see ProposalSystem.
+var project_id := -1
+## Farm crop growth 0..1 and harvests so far.
+var crop_growth := 0.0
+var harvests := 0
+## Who is working here right now (farm / workshop), to avoid crowding.
+var workers := 0
+var _crops: MeshInstance3D
 
 var _model: MeshInstance3D
 var _scaffold: MeshInstance3D
@@ -75,8 +83,19 @@ func _build_visuals() -> void:
 		_piles[ResourceType.FOOD] = _add_mesh(MeshFactory.food_baskets(), Vector3(0.5, 0.15, 0.7))
 	else:
 		_foundation = _add_mesh(MeshFactory.foundation(def.footprint_radius * 0.85))
-		_model = _add_mesh(MeshFactory.hut())
+		_model = _add_mesh(model_mesh(def))
 		_scaffold = _add_mesh(MeshFactory.scaffold(def.footprint_radius * 0.92))
+		if def.id == &"farm":
+			_crops = _add_mesh(MeshFactory.crops(def.footprint_radius))
+
+
+static func model_mesh(d: BuildingDef) -> Mesh:
+	match d.id:
+		&"farm": return MeshFactory.farm_field(d.footprint_radius)
+		&"workshop": return MeshFactory.workshop()
+		&"longhouse": return MeshFactory.longhouse()
+		&"shrine": return MeshFactory.shrine()
+	return MeshFactory.hut()
 
 
 func _add_mesh(mesh: Mesh, offset: Vector3 = Vector3.ZERO) -> MeshInstance3D:
@@ -219,6 +238,9 @@ func _refresh_visuals() -> void:
 		return
 	if def.is_storage or def.is_campfire:
 		return
+	if _crops:
+		_crops.visible = is_complete and crop_growth > 0.02
+		_crops.scale = Vector3(1.0, maxf(0.05, crop_growth), 1.0)
 	if is_complete:
 		_model.scale = Vector3.ONE
 		_model.visible = true
@@ -228,6 +250,19 @@ func _refresh_visuals() -> void:
 		var w := work_progress()
 		_model.visible = w > 0.0
 		_model.scale = Vector3(1.0, maxf(0.05, w), 1.0)
+
+
+## Farming: tending makes the crop grow; returns true when it is ripe.
+func tend(amount: float) -> bool:
+	crop_growth = minf(1.0, crop_growth + amount)
+	_refresh_visuals()
+	return crop_growth >= 1.0
+
+
+func harvest_crop() -> void:
+	crop_growth = 0.0
+	harvests += 1
+	_refresh_visuals()
 
 
 func update_storage_visual(amounts: Dictionary) -> void:
@@ -243,6 +278,8 @@ func describe_status() -> String:
 		if def.housing > 0:
 			_prune_sleepers()
 			return "Shelter: %d / %d sleeping" % [sleepers.size(), def.housing]
+		if def.id == &"farm":
+			return "Crop %d%% grown  ·  %d harvests" % [int(crop_growth * 100.0), harvests]
 		return "Operational"
 	if not materials_complete():
 		var parts: PackedStringArray = []

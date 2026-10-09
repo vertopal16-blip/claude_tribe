@@ -1,9 +1,10 @@
 # Emergent Personalities and Social Simulation
 
-> **Status: implemented (first version).** Sections 1–3 are the original
-> specification and design. [Section 7](#7-what-is-implemented) describes
-> what is actually built, and [section 8](#8-not-yet-implemented) lists what
-> is still open.
+> **Status: implemented.** Sections 1–3 are the original specification and
+> design. [Section 7](#7-audit-of-the-previous-version-why-no-couples-formed)
+> is the audit, [section 8](#8-what-is-implemented) describes what is built
+> and tested, and [section 9](#9-limitations-and-unfinished-parts) lists
+> what is still open.
 
 ---
 
@@ -235,43 +236,120 @@ Two layers, strictly separated:
 
 ---
 
-## 7. What is implemented
+## 7. Audit of the previous version (why no couples formed)
 
-All code lives in `scripts/social/` plus the new villager tasks. Everything is
-deterministic (seeded) and runs without any language model.
+Before this rewrite the social layer had personalities, memories and opinions,
+but nothing that turned them into a living society:
+
+- **Couples could never form after the start.** A partnership required mutual
+  affection plus familiarity, but successful flirts never reached any
+  romance logic. A flirt changed affinity a little and was forgotten. There
+  was no attraction value, no courting stage and no proposal, so the two
+  founding couples were the only couples there would ever be.
+- **No reproduction.** `Tribe.add_villager()` was never called after the
+  start. There was no sex, no age progression and no pregnancy.
+- **Superficial items:** personality had 10 traits and mood was a single
+  number. There were no skills or professions, no tribe-level decisions,
+  leadership, culture or history, and no save/load beyond the social state.
+- **Bugs found while auditing:** a freed resource node could still be targeted
+  when two sim ticks shared a frame, which broke determinism. Text
+  serialization rounded floats. Babies were given homes by the planner.
+
+## 8. What is implemented
+
+Everything is deterministic (seeded) and offline. Tribe-level systems live in
+`scripts/society/` and are owned by `SocietySystem`, which staggers its
+subsystems across ticks.
 
 | Area | Implementation |
 |---|---|
-| **Personality** | `Personality`: 10 traits generated from `social_seed` (0 = world seed) and the villager id. Traits drift by at most ±0.2 from the inborn value through experiences (`MemoryPolicy.TRAIT_DRIFT`). `compatibility()` measures how well two temperaments get along. |
-| **Probabilistic decisions** | `PersonalityModifier` and `SocialModifier` (mood) bias goal scores. Non-urgent choices are sampled (seeded) among goals scoring within 80% of the best, so traits shift behaviour without scripting it. Urgent needs (score ≥ 0.8) stay deterministic. |
-| **Memory** | `VillagerMemory`: at most 24 short-term and 16 long-term records. Repeats merge into one record with a count. Salience decays (fast short-term, slow long-term). Only important or often-repeated experiences are promoted. Mood comes from salient memories. |
-| **Experiences → relationships** | `SocialSystem.remember()` is the single path: memory record + opinion change (scaled by empathy and trust) + familiarity + trait drift + bond re-evaluation. Rules live in `MemoryPolicy`. |
-| **Relationships** | `RelationshipGraph`: directional affinity and trust, mutual familiarity, and tags (kin, partner, friend, rival). Friends, rivals and partners emerge from thresholds, and partnerships require mutual affection plus familiarity. Founders start with two couples and one pair of siblings. |
-| **Knowledge** | Villagers only use resource locations they have seen (14 m perception, refreshed as they move) or been told about. Facts are snapshots and can be stale. Arriving at an emptied place someone told you about creates a "misled" memory toward that person. When the tribe needs a resource nobody knows of, villagers explore. |
-| **Conversations** | `ConversationSystem` pairs idle or lonely villagers. `SocializeTask` actively walks to someone the villager likes, and the other decides whether to stop and talk. Topics: small talk, sharing a location, asking for food, offering food, consoling, gossip, insults or arguments, and flirting. The choice weighs both personalities, relationship, mood, needs and what each actually knows. Speech bubbles show the lines. |
-| **Validation boundary** | A conversation's result is a `ConversationOutcome` (plain data). It is applied only after `validate()` checks it against the live state: the speaker must hold the fact, the giver must carry the food, and both must be alive. Tests confirm that invented facts or food are rejected. This is the hook for any future generative dialogue. |
-| **Crises** | Starving villagers ask people carrying food for help (`AskFoodTask`). Caring villagers bring food to hungry friends (`HelpTask`), and gatherers reconsider on the way home. Refusals and help become strong memories. Deaths create grief for partners, family and friends, "saw death" memories for witnesses, and consoling conversations. |
-| **Loneliness** | A social need (faster for sociable villagers), eased by conversation and by evenings at the campfire. |
-| **Emergent settlement** | Every household wants its own home. `SettlementPlanner` builds for a specific villager (couples first, then the most ambitious), scoring sites from their point of view: near people they like, away from rivals, central or remote by independence, and near the resources they work with. Homes are owned (`Building.owner_ids`), and partners move in together. The same world with a different `social_seed` grows a different village (tested). |
-| **Determinism** | Simulation time advances only in fixed ticks, and movement runs in ticks with interpolated visuals. The same seed produces the same state hash at different frame rates (tested at 60 and 23 fps). |
-| **Persistence (social)** | `SocialSystem.to_dict()` / `load_dict()` cover the graph, personalities, memories, knowledge and loneliness (round-trip tested). |
-| **UI** | The villager panel shows personality words, mood, partner, family, friends, rivals, known places, notable memories and a Company bar. Building panels show who a home belongs to. Social notifications appear in purple. |
+| **Personality** | 19 traits (sociability, ambition, empathy, aggressiveness, curiosity, courage, honesty, generosity, jealousy, patience, independence, loyalty, competitiveness, risk tolerance, creativity, industriousness, trust, status desire, social need). Each feeds into goal scoring, topic choice, conflict escalation, romance, voting and learning. Experiences cause small drifts. Children inherit a blend of both parents plus variation. |
+| **Emotions** | 18 emotions (`Emotions`), each with intensity, a per-emotion half-life and personality-dependent reactivity, plus a list of causes such as "Went hungry with no food in sight". `EmotionModifier` changes decisions: grief and sadness lower work, fear lowers exploring, gratitude raises helping, anger raises confrontation. The inspector shows the emotions with their causes. |
+| **Memory** | Many experience kinds (`MemoryPolicy`) with emotion and trait effects. Old memories become vague ("someone"). They are periodically **reinterpreted** in the light of the current opinion of the person. Two people remember the same fight or rumour differently (perspective and valence are personal). |
+| **Relationships** | Directional affection, trust, respect, attraction and resentment, plus mutual familiarity and tags (kin, partner, spouse, ex-partner, friend, rival, enemy, mentor, courting). Resentment builds from wrongs and fades over time, faster for patient, empathetic and loyal people. Indexed for O(degree) queries. |
+| **Romance** | `RomanceSystem` covers orientation, a stable chemistry "spark", compatibility, respect and age gap. **Longing:** people alone for a long time become less choosy and seek out free singles. The process runs attraction, then flirting (which can be refused), then courting, then a proposal (which can be refused, and depends on family opinion, trust and grudges). After that come a shared household, lifelong partnership, jealousy on witnessing flirts, infidelity, and breakup with a cooldown before rekindling. |
+| **Families and demographics** | Conception needs a fertile opposite-sex couple, health, food stores per person, a home with room, and spacing between births. The inspector shows the reason when one is blocked. Pregnancy lasts 3 days, then birth with inherited traits and aptitudes. Life stages are child, youth, adult and elder, with visible size and grey hair. Old-age mortality and a population cap apply. Parent records survive death, which gives a family view in the inspector. |
+| **Conversations** | About 25 intents chosen from personality, emotions, relationship, needs, knowledge and society state. Intents are repetition-penalised per pair. Continuity comes from promises (kept or broken later), grudges, reconciliation and debates. People can refuse, disagree, deny, escalate to fights, or be mediated. Each outcome is plain data, validated, then applied: this is the boundary for any future LLM. |
+| **Skills and knowledge** | Nine skills improve with practice (diminishing returns), observation and teaching, and decay without use. Inborn aptitudes are inherited. Efficiency depends on skill, tools, life stage, stress and guild membership. There are five discoveries (agriculture, fishing, toolmaking, herbalism, carpentry). They are made independently, spread by teaching, and lost if every knower dies. |
+| **Professions and guilds** | A profession is taken up when someone is competent and spends a large share of their recent work on one skill. It is kept for a minimum tenure and changed only for a better craft. Professions bias choices (`ProfessionModifier`). Work crews become guilds with apprenticeship once the tribe has at least 16 people and a master. |
+| **Projects** | Villagers propose a farm, workshop, longhouse or shrine from their own concerns. Others support or oppose based on their concerns, relationship to the proposer, rivalry, cost and risk, and group alignment. The government decides. Approved projects get a site and effort. They can fail (deadline), and the proposer gains or loses prestige. |
+| **Government** | Influence comes from prestige, respect, skills and endorsements. Government types emerge: none, informal leader, chief (elected in a crisis or as the tribe grows), hereditary succession (lineage tradition), or council (longhouse plus consensus culture). There are challenges, loss of leadership, succession on death, and mediation of disputes. |
+| **Groups** | Friend circles, extended families, work crews and guilds, political factions and keepers. They affect conversation partners, votes, apprenticeship and work efficiency. Groups form and drift apart. |
+| **Culture** | Norms (cooperation, hierarchy, spirituality, industry, consensus, tradition) drift with events and generations. Traditions include a sharing custom, strict rationing, funeral rites, a harvest feast, evening fires, lineage and peacekeeping. They change rationing, escalation, sharing and succession, and drive ceremonies attended by real villagers. |
+| **Economy** | Every resource comes from the world. Tools are made in a workshop from wood and stone and wear out. Tools are held in common or privately depending on the cooperation norm, and are gifted, traded or bartered. Tool access is uneven, so efficiency is uneven. |
+| **Chronicle** | `HistoryLog` keeps up to 600 entries (C key) and feeds conversation context ("since Aru died…"). |
+| **Save/load** | `SaveSystem` uses a binary Variant encoding (exact floats). The world is regenerated from the seed, and then resources, buildings, villagers, every social and society subsystem and the clock are restored. This is verified with a fingerprint comparison. |
+| **Inspection** | Inspector (I): the decision trace (scores and each modifier), needs, emotions with causes, traits, skills, techniques, family and conception blocker, relationships with all five dimensions, groups, memories and recent lines. There is also a tribe panel (T), a chronicle (C) and a relationship line overlay. |
 
-## 8. Not yet implemented
+### Test mapping (`tests/society_test.gd`)
 
-- **Full save/load of the world.** Only social state serializes; terrain is
-  regenerated from the seed, but buildings, resource amounts, inventories and
-  running tasks are not saved yet.
-- **Births and families growing.** `Tribe.add_villager()` is ready, and kin
-  edges and trait inheritance would hook in there.
-- **Generative dialogue.** Lines come from templates in `DialogueRenderer`.
-  A language model could replace the renderer, or propose outcomes through
-  `ConversationOutcome.validate()`, but never change state directly.
-- **Social groups as a concept.** Clusters of mutual friends exist implicitly
-  but aren't named, shown or used by the AI.
-- **Ambitions / personal goals** beyond the ambition trait's effect on
-  building and on who gets the next home.
-- **Performance at scale.** With 208 villagers the mean simulation tick is
-  about 11 ms (about 4.5 ms before the social layer). The settlement planner
-  can cause a one-off spike of about 40 ms when choosing a home site, which
-  could be spread over several ticks.
+Each requirement is checked twice. First the tribe is left alone for 30 days
+and the test checks what emerged. Then each mechanism is exercised directly.
+
+| Req. | Emergent check | Mechanism check |
+|---|---|---|
+| 1 Interaction | ≥30 conversations, ≥6 topics | — |
+| 2 Friendship | friend links exist | repeated good times → friend tag |
+| 3 Romance | ≥1 new couple formed during the run | interest → flirting → courting → accepted proposal |
+| 4 Households | — | the couple share a home |
+| 5 Reproduction | ≥1 birth | blocked while food is scarce, possible with food and a home; the child has both parents and kin links |
+| 6 Life stages | — | a newborn is a child that doesn't work, then a youth who helps; children are visibly smaller |
+| 7 Memories | — | being wronged unlocks "accuse" and lowers trust |
+| 8 Emotions | — | grief lowers the score for work |
+| 9 Skills | — | practice raises skill and real work speed; teaching raises skill |
+| 10 Groups | groups form | group members back each other's proposals |
+| 11 Projects | ≥1 completed (when a known technique allows one) | a supported proposal is approved and placed; completion raises prestige |
+| 12 Professions | ≥1 profession emerges | steady practice leads to a profession |
+| 13 Leadership | — | election with majority backing; an unpopular chief is replaced |
+| 14 Disputes | — | after a fight, the person opposes the other's plans and won't settle next to them |
+| 15 Different histories | not automated: compare the per-seed summaries below | — |
+| 16 Save/load | — | save, reload, fingerprint equality, the tribe keeps living |
+| 17 Inspection | — | inspector, chronicle and tribe panel contents |
+
+Mechanisms present in the code but **not** covered by an automated check:
+observation learning, skill decay, fear's effect on exploring, project
+failure, mediation, guilds, ceremonies and traditions, tool trade, and
+technology loss. They appear in long runs and the chronicle but are not
+asserted.
+
+These results were measured on the version being committed (30 days each):
+
+| Seed | Pop. | Births | New couples | Government | Professions | Projects |
+|---|---|---|---|---|---|---|
+| 1234 | 14 | 6 | 1 | chief | 3 | 3 |
+| 5 | 13 | 6 | 2 | chief | 4 | 2 |
+| 777 | 13 | 5 | 1 | chief | 4 | 3 |
+| 42 | 13 | 5 | 3 (1 breakup) | chief | 4 | 3 |
+| 2024 | 14 | 6 | 1 | chief | 5 | 3 |
+| 99 | 9 | 1 | 1 | none | 5 | 2 |
+
+All six pass with 0 failures. Other results:
+
+- **Determinism:** the state hash is identical at 60 and 23 fps.
+- **Performance:** with 208 villagers the mean tick is about 12 ms and the
+  maximum about 55 ms (headless).
+- **Long run:** a 60-day run (seed 777) went through a full generation. Children
+  grew up, courted, partnered and had their own children, founders became
+  elders, and leadership changed.
+
+## 9. Limitations and unfinished parts
+
+- **Dialogue is template-based.** No language model is used. The
+  `ConversationOutcome.validate()` boundary is ready for one but not connected.
+- **Running tasks and graves are not saved.** After loading, villagers decide
+  again from their restored state.
+- **Economy:** only tools are private or communal goods. Food is always shared
+  (with rationing traditions). There are no household stores, markets or
+  currency.
+- **No defence or warfare.** There is only one tribe by design, and no guards
+  or defensive structures.
+- **Biology:** biological children require an opposite-sex couple. Same-sex
+  couples can form, but there is no adoption yet.
+- **Settings:** fishing needs a reachable lake shore. The settlement planner
+  can cause a one-off spike of tens of ms when choosing a site.
+- **Short time scale.** A year is 2 days, so generations are visible. Founders
+  in their forties age out of fertility within about 10–20 days, so population
+  growth depends on the next generation.
+- **Some emergent events are seed-dependent.** In some seeds no breakups,
+  rivalries or council happen within 30 days. That is intended variability,
+  but it means not every institution appears in every run.
