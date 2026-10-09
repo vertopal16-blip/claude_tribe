@@ -8,8 +8,11 @@ signal stockpile_changed(amounts: Dictionary)
 signal population_changed(count: int)
 signal villager_spawned(villager: Node)
 signal villager_died(villager: Node, cause: String)
-## Generic hook for meaningful villager actions ("ate", "delivered", "built"...).
-## Intended consumer: a future per-villager memory system.
+## Meaningful villager actions ("ate", "delivered", "completed_building"...).
+## Emitted only through Villager.record_event(), so `data` is always plain,
+## serializable values: stable ids instead of node references, plus
+## "villager_id", "time", "day" and "position". Intended consumers: a future
+## per-villager memory system, statistics and save files.
 signal villager_event(villager: Node, event_name: StringName, data: Dictionary)
 signal building_placed(building: Node)
 signal building_completed(building: Node)

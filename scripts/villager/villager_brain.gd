@@ -40,7 +40,8 @@ var _rng := RandomNumberGenerator.new()
 
 func _init(v: Villager) -> void:
 	villager = v
-	_rng.seed = hash(v.villager_id * 7919)
+	# Seeded from the world seed so a replayed world makes the same choices.
+	_rng.seed = hash([v.ctx.world_seed, v.villager_id])
 	_think_timer = _rng.randf_range(0.0, 0.6)  # stagger decisions across villagers
 
 
@@ -86,8 +87,7 @@ func _can_eat_somewhere() -> bool:
 		return true
 	if villager.ctx.tribe.stockpile.get_amount(ResourceType.FOOD) > 0:
 		return true
-	return villager.ctx.resources.find_best(ResourceType.FOOD, villager.global_position,
-			villager.get_region(), get_blacklist()) != null
+	return villager.knowledge.find_resource(ResourceType.FOOD) != null
 
 
 # --------------------------------------------------------------------------

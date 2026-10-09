@@ -111,6 +111,7 @@ func _place_bush(pos: Vector3) -> bool:
 
 
 func _add_node(node: ResourceNode, pos: Vector3) -> void:
+	node.entity_id = ctx.allocate_entity_id()
 	_resource_root.add_child(node)
 	node.global_position = ctx.terrain.snap_to_ground(pos) - Vector3(0, 0.05, 0)
 	node.rotation.y = rng.randf() * TAU

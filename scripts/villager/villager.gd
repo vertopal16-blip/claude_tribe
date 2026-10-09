@@ -20,6 +20,7 @@ var hair_color := MeshFactory.C_HAIR
 var ctx: WorldContext
 var needs: VillagerNeeds
 var inventory: VillagerInventory
+var knowledge: VillagerKnowledge
 var movement: VillagerMovement
 var brain: VillagerBrain
 
@@ -51,6 +52,7 @@ func setup(context: WorldContext, id: int, display_name: String, age: float, tun
 	needs = VillagerNeeds.new(ctx.config)
 	inventory = VillagerInventory.new(ctx.config.carry_capacity)
 	movement = VillagerMovement.new(self, ctx.nav, ctx.terrain, ctx.config.move_speed)
+	knowledge = VillagerKnowledge.new(self)
 	brain = VillagerBrain.new(self)
 	brain.add_modifier(HabitModifier.new())
 
@@ -126,6 +128,17 @@ func get_task_description() -> String:
 	if current_task == null:
 		return VillagerState.label(state)
 	return current_task.describe()
+
+
+## Reports a meaningful action. `data` must hold plain values only (ids, numbers,
+## strings, vectors) - never nodes - so the event can be remembered or saved.
+func record_event(event_name: StringName, data: Dictionary = {}) -> void:
+	var payload := data.duplicate()
+	payload["villager_id"] = villager_id
+	payload["time"] = SimClock.sim_time
+	payload["day"] = SimClock.get_day()
+	payload["position"] = global_position
+	EventBus.villager_event.emit(self, event_name, payload)
 
 
 func die(cause: String) -> void:

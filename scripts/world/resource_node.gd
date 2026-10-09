@@ -13,6 +13,8 @@ const COLLISION_LAYER := 4  # bit 3 -> "resources"
 enum Kind { TREE, ROCK, BUSH }
 
 var kind: int = Kind.TREE
+## Stable id from WorldContext.allocate_entity_id().
+var entity_id: int = 0
 var resource_type: int = ResourceType.WOOD
 var amount: int = 0
 var max_amount: int = 0

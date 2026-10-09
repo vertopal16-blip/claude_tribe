@@ -28,10 +28,8 @@ func start() -> bool:
 
 
 func _find_bush() -> bool:
-	var region := villager.get_region()
 	for attempt in 3:
-		var candidate := ctx.resources.find_best(ResourceType.FOOD, villager.global_position, region,
-				villager.brain.get_blacklist())
+		var candidate := villager.knowledge.find_resource(ResourceType.FOOD)
 		if candidate == null or not candidate.reserve():
 			return false
 		if villager.movement.move_to(candidate.global_position, 3):
@@ -93,7 +91,10 @@ func _consume() -> int:
 	if got <= 0:
 		return _fail("The food was gone")
 	villager.needs.eat(got)
-	EventBus.villager_event.emit(villager, &"ate", {"amount": got, "source": source})
+	var data := {"amount": got, "source": Source.keys()[source].to_lower()}
+	if source == Source.BUSH and is_instance_valid(bush):
+		data["resource_id"] = bush.entity_id
+	villager.record_event(&"ate", data)
 	return Status.SUCCEEDED
 
 

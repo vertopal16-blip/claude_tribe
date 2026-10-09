@@ -28,10 +28,8 @@ func start() -> bool:
 
 
 func _acquire_node(max_distance: float) -> bool:
-	var region := villager.get_region()
 	for attempt in 3:
-		var candidate := ctx.resources.find_best(resource_type, villager.global_position, region,
-				villager.brain.get_blacklist(), ctx.tribe.storage.global_position, 0.6, max_distance)
+		var candidate := villager.knowledge.find_resource(resource_type, 0.6, max_distance)
 		if candidate == null:
 			return false
 		if not candidate.reserve():

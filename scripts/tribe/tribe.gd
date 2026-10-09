@@ -7,8 +7,6 @@ signal population_changed(count: int)
 
 const VILLAGER_SCENE := preload("res://scenes/villager.tscn")
 const SEPARATION_RADIUS := 0.75
-const PLANNER_INTERVAL := 5.0
-const MAX_AUTO_SITES := 1
 const MAX_SITES := 4
 
 const NAMES: Array[String] = [
@@ -30,9 +28,9 @@ var storage: Building
 var center := Vector3.ZERO
 var auto_build := true
 var deaths := 0
+var planner: SettlementPlanner
 
 var _next_villager_id := 1
-var _planner_timer := 0.0
 var _goal_counts: Dictionary = {}
 var _decisions_left := 0
 
@@ -46,6 +44,7 @@ var _construction_need: Dictionary = ResourceType.empty_amounts()
 func setup(context: WorldContext) -> void:
 	ctx = context
 	auto_build = ctx.config.auto_build_huts
+	planner = SettlementPlanner.new(self)
 	var c := ctx.terrain.settlement_center
 	center = ctx.terrain.snap_to_ground(Vector3(c.x, 0, c.y))
 	campfire = _spawn_building(BuildingCatalog.get_def(&"campfire"), center, true)
@@ -111,10 +110,7 @@ func sim_tick(dt: float) -> void:
 	_update_separation()
 	for v in villagers.duplicate():
 		v.sim_tick(dt)
-	_planner_timer -= dt
-	if _planner_timer <= 0.0:
-		_planner_timer = PLANNER_INTERVAL
-		_plan_construction()
+	planner.tick(dt)
 	perf_last_tick_ms = (Time.get_ticks_usec() - t0) / 1000.0
 	perf_avg_tick_ms = lerpf(perf_avg_tick_ms, perf_last_tick_ms, 0.05)
 	perf_max_tick_ms = maxf(perf_max_tick_ms, perf_last_tick_ms)
@@ -210,7 +206,7 @@ func deposit_inventory(v: Villager) -> void:
 	if int(cargo["amount"]) <= 0:
 		return
 	stockpile.add(cargo["type"], cargo["amount"])
-	EventBus.villager_event.emit(v, &"delivered", cargo)
+	v.record_event(&"delivered", {"resource_type": cargo["type"], "amount": cargo["amount"]})
 
 
 func _on_stockpile_changed(amounts: Dictionary) -> void:
@@ -356,6 +352,7 @@ func cancel_construction(b: Building) -> void:
 func _spawn_building(def: BuildingDef, pos: Vector3, complete: bool) -> Building:
 	var b := Building.new()
 	b.setup(def, complete)
+	b.entity_id = ctx.allocate_entity_id()
 	ctx.world_root.add_child(b)
 	# Sit on the lowest point of the footprint so nothing floats.
 	var y := ctx.terrain.height_at(pos.x, pos.z)
@@ -383,35 +380,9 @@ func _on_building_completed(b: Building) -> void:
 	EventBus.notify("A new %s has been completed!" % b.def.display_name.to_lower(), &"build")
 
 
-func _plan_construction() -> void:
-	if not auto_build:
-		return
-	var hut := BuildingCatalog.get_def(&"hut")
-	if planned_housing() >= population():
-		return
-	var auto_sites := 0
-	for s in construction_sites():
-		if not s.placed_by_player:
-			auto_sites += 1
-	if auto_sites >= MAX_AUTO_SITES:
-		return
-	var spot := find_build_spot(hut)
-	if spot != Vector3.INF:
-		place_building(hut, spot, false)
-
-
+## Kept for callers that only need a spot; planning lives in SettlementPlanner.
 func find_build_spot(def: BuildingDef) -> Vector3:
-	var r := 9.0
-	while r <= ctx.config.settlement_build_radius:
-		var steps := int(TAU * r / 4.0)
-		var offset := ctx.rng.randf() * TAU
-		for i in steps:
-			var a := offset + TAU * i / steps
-			var p := center + Vector3(cos(a), 0, sin(a)) * r
-			if can_place(def, p) == "":
-				return p
-		r += 2.5
-	return Vector3.INF
+	return planner.find_build_spot(def)
 
 
 # --------------------------------------------------------------------------

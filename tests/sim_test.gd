@@ -12,7 +12,7 @@ var phase := "setup"
 var failures: PackedStringArray = []
 var stats := {
 	"ate": 0, "delivered": {0: 0, 1: 0, 2: 0}, "buildings_completed": 0, "deaths": 0,
-	"max_hunger": 0.0, "min_energy": 100.0, "states_seen": {}, "night_sun_energy": -1.0, "day_sun_energy": -1.0,
+	"max_hunger": 0.0, "events": 0, "bad_events": 0, "min_energy": 100.0, "states_seen": {}, "night_sun_energy": -1.0, "day_sun_energy": -1.0,
 }
 var _last_positions := {}
 var _distance := {}
@@ -57,11 +57,19 @@ func _ready() -> void:
 
 
 func _on_villager_event(_v: Node, event_name: StringName, data: Dictionary) -> void:
+	stats.events += 1
+	# Memory/persistence contract: plain values only, with who/when/where.
+	for key in ["villager_id", "time", "day", "position"]:
+		if not data.has(key):
+			stats.bad_events += 1
+	for value in data.values():
+		if typeof(value) == TYPE_OBJECT:
+			stats.bad_events += 1
 	match event_name:
 		&"ate":
 			stats.ate += 1
 		&"delivered":
-			stats.delivered[int(data["type"])] += int(data["amount"])
+			stats.delivered[int(data["resource_type"])] += int(data["amount"])
 
 
 func check(cond: bool, what: String) -> void:
@@ -143,6 +151,13 @@ func _initial_checks() -> void:
 			near[n.resource_type] += 1
 	check((starve or near[0] >= 8) and near[1] >= 10 and near[2] >= 4, "Start area has reachable food/wood/stone %s" % str(near))
 	check(tribe.campfire != null and tribe.storage != null, "Campfire and stockpile exist")
+	var entity_ids := {}
+	for n in main.ctx.resources.all_nodes():
+		entity_ids[n.entity_id] = true
+	for b in tribe.buildings:
+		entity_ids[b.entity_id] = true
+	check(not entity_ids.has(0) and entity_ids.size() == main.ctx.resources.all_nodes().size() + tribe.buildings.size(),
+			"World objects have unique stable entity ids")
 	check(tribe.housing_capacity() >= 4, "Starting shelters exist (beds=%d)" % tribe.housing_capacity())
 
 	# Camera: zoom / rotate / focus.
@@ -212,6 +227,7 @@ func _final_checks() -> void:
 	var tribe := main.tribe
 	print("[test] final checks after %.0f sim seconds" % SimClock.sim_time)
 	print("[test] stats: %s" % str(stats))
+	check(stats.events > 0 and stats.bad_events == 0, "Villager events are serializable with who/when/where (%d events)" % stats.events)
 	check(stats.ate > 0, "Hungry villagers found and ate food (%d meals)" % stats.ate)
 	check(stats.delivered[ResourceType.FOOD] > 0, "Food gathered and delivered (%d)" % stats.delivered[ResourceType.FOOD])
 	check(stats.delivered[ResourceType.WOOD] > 0, "Wood gathered and delivered (%d)" % stats.delivered[ResourceType.WOOD])

@@ -8,6 +8,8 @@ signal completed(building: Building)
 const COLLISION_LAYER := 8  # bit 4 -> "buildings"
 
 var def: BuildingDef
+## Stable id from WorldContext.allocate_entity_id().
+var entity_id: int = 0
 var is_complete := false
 var delivered: Dictionary = ResourceType.empty_amounts()
 var in_transit: Dictionary = ResourceType.empty_amounts()
@@ -37,7 +39,7 @@ func setup(building_def: BuildingDef, start_complete: bool) -> void:
 func _ready() -> void:
 	collision_layer = COLLISION_LAYER
 	collision_mask = 0
-	name = "%s_%d" % [String(def.id).capitalize(), get_instance_id()]
+	name = "%s_%d" % [String(def.id).capitalize(), entity_id]
 	var shape := CylinderShape3D.new()
 	shape.radius = def.footprint_radius
 	shape.height = 3.0 if def.housing > 0 else 1.2

@@ -85,7 +85,8 @@ func tick(dt: float) -> int:
 					var used := site.complete_delivery(material_type, carried)
 					villager.inventory.remove(used)
 					_reserved_amount = 0
-					EventBus.villager_event.emit(villager, &"delivered_materials", {"site": site, "amount": used})
+					villager.record_event(&"delivered_materials", {"building_id": site.entity_id,
+							"building_type": site.def.id, "resource_type": material_type, "amount": used})
 					if site.materials_complete() and site.builders < site.def.max_builders:
 						site.builders += 1
 						_is_builder = true
@@ -105,7 +106,7 @@ func tick(dt: float) -> int:
 			if site.is_complete:
 				return Status.SUCCEEDED
 			if site.add_work(ctx.config.build_rate * villager.needs.performance() * dt):
-				EventBus.villager_event.emit(villager, &"completed_building", {"building": site})
+				villager.record_event(&"completed_building", {"building_id": site.entity_id, "building_type": site.def.id})
 				return Status.SUCCEEDED
 	return Status.RUNNING
 

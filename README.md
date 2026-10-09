@@ -68,9 +68,9 @@ scripts/
   world/      terrain.gd, nav_grid.gd (AStarGrid2D + obstacles + regions), world_generator.gd,
               resource_node.gd, resource_registry.gd, resource_type.gd, day_night_cycle.gd
   villager/   villager.gd (composition root) + villager_needs / _inventory / _movement /
-              _brain / _state, decision_modifier.gd, habit_modifier.gd
+              _brain / _state / _knowledge, decision_modifier.gd, habit_modifier.gd
               tasks/  villager_task.gd base + gather, eat, rest, build, deliver, idle
-  tribe/      tribe.gd (villagers, demand, housing, construction planner), stockpile.gd
+  tribe/      tribe.gd (villagers, demand, housing), settlement_planner.gd, stockpile.gd
   buildings/  building_def.gd (data), building_catalog.gd, building.gd
   camera/     rts_camera.gd
   interaction/world_interaction.gd  raycast selection + placement ghost
@@ -88,9 +88,13 @@ Key design points:
 - **Personality hook.** `VillagerBrain` scores goals, then passes the scores through every
   `DecisionModifier` attached to the villager. `HabitModifier` is the first real one. Traits,
   memories, relationships and mood can plug in here without touching the brain or tasks.
-- **Memory hook.** Meaningful actions emit `EventBus.villager_event(villager, name, data)`
-  ("ate", "delivered", "delivered_materials", "completed_building"). Deaths, buildings and
-  so on have their own signals.
+- **Memory hook.** Meaningful actions go through `Villager.record_event()`, which emits
+  `EventBus.villager_event` with plain, serializable data (stable ids, time, day,
+  position — never node references). Deaths, buildings etc. have their own signals.
+- **Knowledge hook.** All "where is food/wood/stone" lookups go through
+  `VillagerKnowledge`, so omniscient queries can later become learned knowledge.
+- **Stable ids.** Villagers have `villager_id`; buildings and resource nodes get an
+  `entity_id` from `WorldContext.allocate_entity_id()` for memories and save files.
 - **Population hook.** `Tribe.add_villager()` is the single entry point for new members,
   so births and families can go through it later.
 - **No tight coupling.** Villagers never touch the UI. Resource nodes don't know villagers
@@ -103,6 +107,14 @@ Key design points:
 - **Performance.** Shared meshes and a single vertex-colour material, MultiMesh for
   decoration, an integer flood fill for connectivity, bounded path smoothing, spatial-hash
   crowd separation. Counts and limits are in `GameConfig` (Performance group).
+
+## Roadmap
+
+The next major system — individual personalities, memory, relationships,
+contextual conversations and emergent settlement layout — is specified in
+[docs/FUTURE_SOCIAL_SIMULATION.md](docs/FUTURE_SOCIAL_SIMULATION.md). It is
+**not implemented yet**; the document lists the seams in the current code it
+will plug into.
 
 ## Tests
 

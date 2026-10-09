@@ -48,6 +48,7 @@ func _ready() -> void:
 	ctx.nav = nav
 	ctx.resources = ResourceRegistry.new(nav)
 	ctx.rng = rng
+	ctx.world_seed = world_seed
 	ctx.world_root = world
 
 	tribe = Tribe.new()
