@@ -6,6 +6,10 @@ extends RefCounted
 var health := 100.0
 var hunger := 0.0  # 0 = full, 100 = starving
 var energy := 100.0
+## Loneliness: 0 = content, 100 = desperate for company. No health effect.
+var social := 0.0
+## Set from personality: sociable villagers get lonely faster.
+var social_rate_mult := 1.0
 
 var _cfg: GameConfig
 
@@ -19,6 +23,8 @@ func tick(dt: float, activity: float, rest_multiplier: float) -> void:
 	# Sleeping slows hunger a bit.
 	var hunger_mult := 0.6 if rest_multiplier > 0.0 else 1.0
 	hunger = minf(100.0, hunger + _cfg.hunger_rate * hunger_mult * dt)
+	if rest_multiplier <= 0.0:
+		social = minf(100.0, social + _cfg.loneliness_rate * social_rate_mult * dt)
 	if rest_multiplier > 0.0:
 		energy = minf(100.0, energy + _cfg.energy_recovery * rest_multiplier * dt)
 	else:

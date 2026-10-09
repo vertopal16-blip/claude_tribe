@@ -7,6 +7,8 @@ signal population_changed(count: int)
 
 const VILLAGER_SCENE := preload("res://scenes/villager.tscn")
 const SEPARATION_RADIUS := 0.75
+## Cell size of the coarse villager index used for social proximity queries.
+const NEAR_CELL := 10.0
 const MAX_SITES := 4
 
 const NAMES: Array[String] = [
@@ -31,13 +33,19 @@ var deaths := 0
 var planner: SettlementPlanner
 
 var _next_villager_id := 1
+var _starting_huts: Array[Building] = []
 var _goal_counts: Dictionary = {}
+var _near_grid: Dictionary = {}  # Vector2i -> Array[Villager], rebuilt every tick
 var _decisions_left := 0
 
 ## Performance instrumentation (milliseconds), shown in the debug overlay.
 var perf_last_tick_ms := 0.0
 var perf_avg_tick_ms := 0.0
 var perf_max_tick_ms := 0.0
+var perf_total_ms := 0.0
+var perf_ticks := 0
+## Accumulated milliseconds per tick section (whole run).
+var perf_sections: Dictionary = {}
 var _construction_need: Dictionary = ResourceType.empty_amounts()
 
 
@@ -45,6 +53,7 @@ func setup(context: WorldContext) -> void:
 	ctx = context
 	auto_build = ctx.config.auto_build_huts
 	planner = SettlementPlanner.new(self)
+	ctx.social = SocialSystem.new(ctx)
 	var c := ctx.terrain.settlement_center
 	center = ctx.terrain.snap_to_ground(Vector3(c.x, 0, c.y))
 	campfire = _spawn_building(BuildingCatalog.get_def(&"campfire"), center, true)
@@ -58,7 +67,7 @@ func setup(context: WorldContext) -> void:
 			break
 		var pos := center + Vector3(cos(a), 0, sin(a)) * 8.5
 		if can_place(hut_def, pos) == "":
-			_spawn_building(hut_def, pos, true)
+			_starting_huts.append(_spawn_building(hut_def, pos, true))
 			placed += 1
 
 	stockpile.changed.connect(_on_stockpile_changed)
@@ -75,6 +84,14 @@ func spawn_initial_villagers() -> void:
 		if cell != NavGrid.INVALID_CELL:
 			pos = ctx.nav.cell_to_world(cell)
 		add_villager(pos, ctx.rng.randf_range(16.0, 42.0))
+	ctx.social.setup_founders(villagers)
+	# Founding couples each start with a hut of their own.
+	var couples := ctx.social.founding_couples()
+	for i in mini(couples.size(), _starting_huts.size()):
+		var hut := _starting_huts[i]
+		for id in couples[i]:
+			hut.owner_ids.append(id)
+			assign_home(ctx.social.get_villager(id), hut)
 
 
 ## Single entry point for new tribe members (future: births, migrants).
@@ -85,9 +102,10 @@ func add_villager(pos: Vector3, age: float) -> Villager:
 	v.setup(ctx, id, NAMES[(id - 1) % NAMES.size()], age, TUNICS[(id - 1) % TUNICS.size()],
 			HAIRS[ctx.rng.randi() % HAIRS.size()])
 	ctx.world_root.add_child(v)
-	v.global_position = ctx.terrain.snap_to_ground(pos)
+	v.place_at(ctx.terrain.snap_to_ground(pos))
 	v.died.connect(_on_villager_died)
 	villagers.append(v)
+	ctx.social.register_villager(v)
 	EventBus.villager_spawned.emit(v)
 	_emit_population()
 	return v
@@ -105,15 +123,38 @@ func sim_tick(dt: float) -> void:
 	var t0 := Time.get_ticks_usec()
 	_decisions_left = ctx.config.max_decisions_per_tick
 	ctx.resources.sim_tick(dt)
+	var ta := Time.get_ticks_usec()
+	_perf_add(&"resources", ta - t0)
 	_update_goal_counts()
 	_update_construction_need()
+	var tb := Time.get_ticks_usec()
+	_perf_add(&"counts", tb - ta)
 	_update_separation()
+	var t1 := Time.get_ticks_usec()
+	_perf_add(&"spatial", t1 - tb)
 	for v in villagers.duplicate():
 		v.sim_tick(dt)
+	var t2 := Time.get_ticks_usec()
+	_perf_add(&"villagers", t2 - t1)
+	ctx.social.tick(dt)
+	var t3 := Time.get_ticks_usec()
+	_perf_add(&"social", t3 - t2)
 	planner.tick(dt)
+	_perf_add(&"planner", Time.get_ticks_usec() - t3)
 	perf_last_tick_ms = (Time.get_ticks_usec() - t0) / 1000.0
 	perf_avg_tick_ms = lerpf(perf_avg_tick_ms, perf_last_tick_ms, 0.05)
 	perf_max_tick_ms = maxf(perf_max_tick_ms, perf_last_tick_ms)
+	perf_total_ms += perf_last_tick_ms
+	perf_ticks += 1
+
+
+func _perf_add(section: StringName, usec: int) -> void:
+	perf_sections[section] = float(perf_sections.get(section, 0.0)) + usec / 1000.0
+
+
+## True mean over the whole run (the overlay's avg is a moving average).
+func perf_mean_tick_ms() -> float:
+	return perf_total_ms / maxf(1.0, perf_ticks)
 
 
 ## Villager brains ask before making a new (pathfinding) decision this tick.
@@ -164,10 +205,35 @@ func get_demand(type: int) -> float:
 	return demand / (1.0 + workers * 0.35)
 
 
+## Living villagers within `radius` of `pos` (positions as of this tick).
+func villagers_near(pos: Vector3, radius: float) -> Array[Villager]:
+	var out: Array[Villager] = []
+	var r2 := radius * radius
+	var lo := Vector2i(int(floor((pos.x - radius) / NEAR_CELL)), int(floor((pos.z - radius) / NEAR_CELL)))
+	var hi := Vector2i(int(floor((pos.x + radius) / NEAR_CELL)), int(floor((pos.z + radius) / NEAR_CELL)))
+	for cx in range(lo.x, hi.x + 1):
+		for cz in range(lo.y, hi.y + 1):
+			var cell = _near_grid.get(Vector2i(cx, cz))
+			if cell == null:
+				continue
+			for v: Villager in cell:
+				if is_instance_valid(v) and not v.is_dead:
+					var d := v.global_position - pos
+					if d.x * d.x + d.z * d.z <= r2:
+						out.append(v)
+	return out
+
+
 func _update_separation() -> void:
-	var cell := 1.5
+	# Cells as large as the push radius: neighbours are always in the 3x3 block.
+	var cell := SEPARATION_RADIUS
 	var grid := {}
+	_near_grid.clear()
 	for v in villagers:
+		var nk := Vector2i(int(floor(v.global_position.x / NEAR_CELL)), int(floor(v.global_position.z / NEAR_CELL)))
+		if not _near_grid.has(nk):
+			_near_grid[nk] = [] as Array[Villager]
+		_near_grid[nk].append(v)
 		v.movement.separation = Vector3.ZERO
 		if v.is_hidden():
 			continue
@@ -237,20 +303,60 @@ func planned_housing() -> int:
 func claim_bed(v: Villager) -> Building:
 	if v.home != null and is_instance_valid(v.home) and v.home.is_complete and v.home.claim_bed(v):
 		return v.home
+	# A hut built for this villager: they get a bed even if a lodger must move out.
+	for b in buildings:
+		if b.is_complete and b.owner_ids.has(v.villager_id) and _make_room(b, v):
+			assign_home(v, b)
+			return b
+	# Move in with a partner who has room.
+	var partner := ctx.social.get_villager(ctx.social.partner_of(v.villager_id))
+	if partner != null and partner.home != null and is_instance_valid(partner.home) \
+			and partner.home.is_complete and partner.home.free_beds() > 0:
+		assign_home(v, partner.home)
+		return partner.home
 	var best: Building = null
 	var best_d := INF
 	for b in buildings:
-		if b.is_complete and b.def.housing > 0 and b.free_beds() > 0:
+		if b.is_complete and b.def.housing > 0 and b.free_beds() > _owners_without_bed(b):
 			var d := b.global_position.distance_to(v.global_position)
 			if d < best_d:
 				best_d = d
 				best = b
 	if best != null:
-		if v.home != null and is_instance_valid(v.home):
-			v.home.release_bed(v)
-		best.claim_bed(v)
-		v.home = best
+		assign_home(v, best)
 	return best
+
+
+func assign_home(v: Villager, b: Building) -> void:
+	if v == null or b == null:
+		return
+	if v.home != null and is_instance_valid(v.home) and v.home != b:
+		v.home.release_bed(v)
+	if b.is_complete and not b.claim_bed(v):
+		return
+	v.home = b
+
+
+func _make_room(b: Building, v: Villager) -> bool:
+	if b.claim_bed(v):
+		return true
+	for s in b.sleepers.duplicate():
+		if s is Villager and not b.owner_ids.has(s.villager_id):
+			b.release_bed(s)
+			if s.home == b:
+				s.home = null
+			return b.claim_bed(v)
+	return false
+
+
+## Beds in `b` that must stay free for owners who haven't claimed them yet.
+func _owners_without_bed(b: Building) -> int:
+	var n := 0
+	for id in b.owner_ids:
+		var o := ctx.social.get_villager(id)
+		if o != null and not b.sleepers.has(o):
+			n += 1
+	return n
 
 
 func find_campfire_rest_spot(v: Villager) -> Vector3:
@@ -376,6 +482,7 @@ func _remove_building(b: Building) -> void:
 
 
 func _on_building_completed(b: Building) -> void:
+	ctx.social.on_building_completed(b)
 	EventBus.building_completed.emit(b)
 	EventBus.notify("A new %s has been completed!" % b.def.display_name.to_lower(), &"build")
 
@@ -392,6 +499,7 @@ func find_build_spot(def: BuildingDef) -> Vector3:
 func _on_villager_died(v: Villager, cause: String) -> void:
 	villagers.erase(v)
 	deaths += 1
+	ctx.social.on_villager_died(v)
 	var grave := MeshInstance3D.new()
 	grave.mesh = MeshFactory.grave_marker()
 	ctx.world_root.add_child(grave)

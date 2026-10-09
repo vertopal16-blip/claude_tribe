@@ -229,5 +229,6 @@ func _update_ring(ring: MeshInstance3D, target: Node3D, scale_mult: float) -> vo
 	elif target is Building:
 		r = (target as Building).def.footprint_radius + 0.4
 	ring.visible = true
-	ring.global_position = target.global_position + Vector3(0, 0.12, 0)
+	var p := (target as Villager).get_visual_position() if target is Villager else target.global_position
+	ring.global_position = p + Vector3(0, 0.12, 0)
 	ring.scale = Vector3.ONE * r * scale_mult

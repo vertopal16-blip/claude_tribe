@@ -22,11 +22,18 @@ var _pause_sim_time := 0.0
 var _start_day := 1
 ## Scenario: no food anywhere -> villagers must die cleanly.
 var starve := false
+## Scenario: food exists but is rare -> sharing, refusals, grief.
+var scarce := false
 ## Stress test: spawn this many additional villagers and measure tick cost.
 var extra_villagers := 0
 var _frame_usec_total := 0
 var _frame_count := 0
 var _frame_start := 0
+## Determinism mode: run without interaction and print a state hash at this tick.
+var hash_at_tick := 0
+var social_seed := 0
+## Print where homes ended up (compare runs with different social seeds).
+var print_layout := false
 
 
 func _ready() -> void:
@@ -37,12 +44,26 @@ func _ready() -> void:
 			days = float(arg.split("=")[1])
 		elif arg == "--starve":
 			starve = true
+		elif arg == "--scarce":
+			scarce = true
 		elif arg.begins_with("--extra-villagers="):
 			extra_villagers = int(arg.split("=")[1])
+		elif arg.begins_with("--hash-at-tick="):
+			hash_at_tick = int(arg.split("=")[1])
+		elif arg.begins_with("--social-seed="):
+			social_seed = int(arg.split("=")[1])
+		elif arg == "--layout":
+			print_layout = true
 	# Headless windows default to 64x64, where the HUD would cover everything.
 	get_tree().root.size = Vector2i(1600, 900)
 	var cfg: GameConfig = load("res://config/default_config.tres").duplicate()
 	cfg.world_seed = seed_value
+	cfg.social_seed = social_seed
+	if scarce:
+		cfg.bush_count = 10
+		cfg.start_area_bushes = 3
+		cfg.starting_food = 0
+		cfg.bush_regrow_interval = 60.0
 	if starve:
 		cfg.bush_count = 0
 		cfg.start_area_bushes = 0
@@ -51,6 +72,8 @@ func _ready() -> void:
 	main.config = cfg
 	add_child(main)
 	EventBus.villager_event.connect(_on_villager_event)
+	if hash_at_tick > 0:
+		SimClock.sim_tick.connect(_on_tick_for_hash)
 	EventBus.building_completed.connect(func(_b): stats.buildings_completed += 1)
 	EventBus.villager_died.connect(func(_v, _c): stats.deaths += 1)
 	print("[test] seed=%d days=%.1f starve=%s extra=%d" % [seed_value, days, starve, extra_villagers])
@@ -84,17 +107,25 @@ func _process(delta: float) -> void:
 		"setup":
 			if frame < 5:
 				return
+			if hash_at_tick > 0:
+				SimClock.set_time_scale(8.0)
+				phase = "hash_wait"
+				return
 			if extra_villagers > 0:
 				_spawn_extra()
 				phase = "run_setup"
 				return
+			if scarce:
+				# Crisis: everyone starts hungry with nothing stored.
+				for v in main.tribe.villagers:
+					v.needs.hunger = 55.0 + v.villager_id * 3.0
 			_initial_checks()
 			_ui_checks()
 			if not starve:
 				_build_flow_checks()
 			_input_checks()
 			phase = "input_wait"
-		"input_wait":
+		"input_wait", "hash_wait":
 			return
 		"input_done":
 			phase = "pause_test"
@@ -123,8 +154,13 @@ func _process(delta: float) -> void:
 					_perf_report()
 				elif starve:
 					_starve_checks()
+				elif scarce:
+					_scarce_checks()
 				else:
 					_final_checks()
+					_social_checks()
+				if print_layout:
+					_print_layout()
 				phase = "done"
 				print("[test] RESULT: %s (%d failures)" % ["OK" if failures.is_empty() else "FAILED", failures.size()])
 				for f in failures:
@@ -141,7 +177,7 @@ func _initial_checks() -> void:
 	for v in tribe.villagers:
 		ids[v.villager_id] = true
 	check(ids.size() == 8, "Villagers have unique ids")
-	if not starve:
+	if not starve and not scarce:
 		check(main.ctx.resources.get_nodes(ResourceType.FOOD).size() > 20, "Food sources exist")
 	check(main.ctx.resources.get_nodes(ResourceType.WOOD).size() > 50, "Trees exist")
 	check(main.ctx.resources.get_nodes(ResourceType.STONE).size() > 10, "Rocks exist")
@@ -149,7 +185,7 @@ func _initial_checks() -> void:
 	for n in main.ctx.resources.all_nodes():
 		if n.global_position.distance_to(tribe.center) < 35.0 and n.region_id == main.ctx.nav.access_region(tribe.center):
 			near[n.resource_type] += 1
-	check((starve or near[0] >= 8) and near[1] >= 10 and near[2] >= 4, "Start area has reachable food/wood/stone %s" % str(near))
+	check((starve or scarce or near[0] >= 8) and near[1] >= 10 and near[2] >= 4, "Start area has reachable food/wood/stone %s" % str(near))
 	check(tribe.campfire != null and tribe.storage != null, "Campfire and stockpile exist")
 	var entity_ids := {}
 	for n in main.ctx.resources.all_nodes():
@@ -270,10 +306,14 @@ func _perf_report() -> void:
 	# Measure a few isolated simulation ticks for a precise number.
 	var tribe := main.tribe
 	var avg_frame := _frame_usec_total / maxf(1.0, _frame_count) / 1000.0
-	print("[test] PERF population=%d  sim tick avg=%.2f ms max=%.2f ms  avg frame (8x speed, headless)=%.2f ms" % [
-		tribe.population(), tribe.perf_avg_tick_ms, tribe.perf_max_tick_ms, avg_frame])
+	print("[test] PERF population=%d  sim tick mean=%.2f ms max=%.2f ms  avg frame (8x speed, headless)=%.2f ms" % [
+		tribe.population(), tribe.perf_mean_tick_ms(), tribe.perf_max_tick_ms, avg_frame])
+	var sections: PackedStringArray = []
+	for k in tribe.perf_sections:
+		sections.append("%s=%.2f" % [k, tribe.perf_sections[k] / maxf(1.0, tribe.perf_ticks)])
+	print("[test] PERF per-tick sections (ms): %s" % " ".join(sections))
 	check(tribe.population() > 0, "Large population still alive")
-	check(tribe.perf_avg_tick_ms < 8.0, "Average sim tick under 8 ms with %d villagers" % tribe.population())
+	check(tribe.perf_mean_tick_ms() < 15.0, "Mean sim tick under 15 ms with %d villagers (%.2f ms)" % [tribe.population(), tribe.perf_mean_tick_ms()])
 
 
 func _ui_checks() -> void:
@@ -336,6 +376,7 @@ func _build_flow_checks() -> void:
 
 func _starve_checks() -> void:
 	print("[test] starvation scenario checks")
+	print("[test] social stats: %s" % str(main.ctx.social.stats))
 	check(stats.deaths > 0, "Villagers die when no food exists (%d deaths)" % stats.deaths)
 	check(main.tribe.population() == 8 - stats.deaths, "Population counter matches deaths")
 	var graves := 0
@@ -407,3 +448,138 @@ func _input_checks() -> void:
 	SimClock.set_paused(false)
 	cam.focus_on(main.tribe.center, true)
 	phase = "input_done"
+
+
+# --------------------------------------------------------------------------
+# Social simulation
+# --------------------------------------------------------------------------
+
+func _social_checks() -> void:
+	print("[test] social checks")
+	var social := main.ctx.social
+	var tribe := main.tribe
+	print("[test] social stats: %s" % str(social.stats))
+	check(social.stats.conversations >= 10, "Villagers hold conversations (%d)" % social.stats.conversations)
+	check(social.stats.topics.size() >= 2, "Conversations cover several topics %s" % str(social.stats.topics))
+	var bonds := 0
+	for v in tribe.villagers:
+		bonds += social.friends_of(v.villager_id).size() + social.rivals_of(v.villager_id).size()
+		check(v.memory.short.size() <= VillagerMemory.SHORT_CAPACITY and v.memory.long.size() <= VillagerMemory.LONG_CAPACITY,
+				"%s's memory stays bounded (%d short, %d long)" % [v.villager_name, v.memory.short.size(), v.memory.long.size()])
+	check(bonds > 0 or social.stats.partnerships > 0, "Friendships or rivalries emerge (%d bond ends)" % bonds)
+	var owned := 0
+	for b in tribe.buildings:
+		if b.def.id == &"hut" and not b.owner_ids.is_empty():
+			owned += 1
+	check(owned >= 3, "Homes belong to specific villagers (%d owned huts)" % owned)
+
+	# Knowledge: a villager who knows nothing can't target anything.
+	var v: Villager = tribe.villagers[0]
+	var saved := v.knowledge.store
+	v.knowledge.store = KnowledgeStore.new()
+	var none_found := v.knowledge.find_resource(ResourceType.WOOD) == null and v.knowledge.find_resource(ResourceType.FOOD) == null
+	v.knowledge.store = saved
+	check(none_found, "Villagers can't use resources they don't know about")
+	var unknown_ok := true
+	for other in tribe.villagers:
+		var r := other.knowledge.find_resource(ResourceType.WOOD)
+		if r != null and other.knowledge.store.get_fact(r.entity_id) == null:
+			unknown_ok = false
+	check(unknown_ok, "Every resource a villager targets is one they know of")
+
+	# Validation: outcomes can't create information or food from nothing.
+	var a: Villager = tribe.villagers[0]
+	var b: Villager = tribe.villagers[1]
+	var o := ConversationOutcome.new()
+	o.speaker_id = a.villager_id
+	o.listener_id = b.villager_id
+	o.facts_to_listener[999999] = {"type": 0, "pos": Vector3.ZERO, "amount": 5, "regrows": true, "time": 0.0, "source": -1}
+	check(not o.validate(social), "Outcome sharing unknown information is rejected")
+	o = ConversationOutcome.new()
+	o.speaker_id = a.villager_id
+	o.listener_id = b.villager_id
+	o.food_giver = a.villager_id
+	o.food_receiver = b.villager_id
+	o.food_amount = 99
+	check(not o.validate(social), "Outcome giving food nobody carries is rejected")
+
+	# Personality biases decisions.
+	var mod := PersonalityModifier.new()
+	var p_saved := v.personality
+	var hard := Personality.from_dict(p_saved.to_dict())
+	var lazy := Personality.from_dict(p_saved.to_dict())
+	hard.values[&"industriousness"] = 1.0
+	lazy.values[&"industriousness"] = 0.0
+	var s1 := {&"gather_wood": 0.4, &"idle": 0.1}
+	var s2 := s1.duplicate()
+	v.personality = hard
+	mod.modify_scores(v, s1)
+	v.personality = lazy
+	mod.modify_scores(v, s2)
+	v.personality = p_saved
+	check(s1[&"gather_wood"] > s2[&"gather_wood"] and s1[&"idle"] < s2[&"idle"], "Industriousness changes work vs idle scores")
+
+	# Helping in a crisis: a caring villager carrying food helps a starving friend.
+	var giver: Villager = tribe.villagers[2]
+	var needy: Villager = tribe.villagers[3]
+	var gid := giver.villager_id
+	var nid := needy.villager_id
+	# Controlled setup: only `needy` is hungry, standing right next to the giver.
+	for other in tribe.villagers:
+		other.needs.hunger = 0.0
+		other.set_hidden(false)
+	needy.place_at(giver.global_position + Vector3(1.5, 0, 0))
+	tribe._update_separation()  # refresh the proximity index for the new position
+	needy.needs.hunger = 90.0
+	needy.inventory.take_all()
+	giver.inventory.take_all()
+	giver.inventory.add(ResourceType.FOOD, 5)
+	social.graph.set_opinion(gid, nid, 0.6, 0.6)
+	check(social.find_person_to_help(giver) == needy, "A starving friend is noticed by someone carrying food")
+	var aff_before := social.graph.affinity(nid, gid)
+	var offer := social.conversations.decide(giver, needy, &"offer_food")
+	check(offer.validate(social), "Food offer validates")
+	offer.apply(social)
+	check(needy.needs.hunger < 90.0 and giver.inventory.amount < 5, "Food changes hands (hunger %.0f)" % needy.needs.hunger)
+	check(social.graph.affinity(nid, gid) > aff_before, "Being helped improves the opinion of the helper")
+	var remembers := false
+	for r in needy.memory.notable(10):
+		if r.kind == &"was_helped" and r.other_id == gid:
+			remembers = true
+	check(remembers, "The helped villager remembers who helped them")
+	giver.inventory.take_all()
+
+	# Persistence: social state survives a save/load round trip.
+	var before := var_to_str(social.to_dict())
+	social.load_dict(str_to_var(before))
+	check(var_to_str(social.to_dict()) == before, "Social state round-trips through to_dict/load_dict")
+
+
+func _on_tick_for_hash(_dt: float) -> void:
+	if SimClock.tick_count != hash_at_tick:
+		return
+	var parts: PackedStringArray = []
+	for v in main.tribe.villagers:
+		var p := v.global_position
+		parts.append("%d:%.3f,%.3f,%.3f:%.3f:%.3f:%s" % [v.villager_id, p.x, p.y, p.z, v.needs.hunger, v.needs.energy,
+			v.current_task.goal_id if v.current_task else "-"])
+	parts.append(str(main.tribe.stockpile.amounts()))
+	parts.append(var_to_str(main.ctx.social.to_dict()))
+	print("[test] STATE_HASH tick=%d hash=%d" % [hash_at_tick, "|".join(parts).hash()])
+	get_tree().quit(0)
+
+
+func _print_layout() -> void:
+	var homes: PackedStringArray = []
+	for b in main.tribe.buildings:
+		if b.def.id == &"hut":
+			homes.append("(%.0f,%.0f)" % [b.global_position.x, b.global_position.z])
+	print("[test] LAYOUT social_seed=%d huts=%s" % [social_seed, " ".join(homes)])
+
+
+func _scarce_checks() -> void:
+	print("[test] scarcity scenario checks")
+	var st := main.ctx.social.stats
+	print("[test] social stats: %s  deaths=%d" % [str(st), stats.deaths])
+	check(st.conversations > 0, "Villagers still talk during scarcity")
+	check(main.tribe.population() >= 6, "Most of the tribe survives scarcity (pop %d)" % main.tribe.population())

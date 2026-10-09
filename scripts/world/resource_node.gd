@@ -35,6 +35,7 @@ var _visual: MeshInstance3D
 var _extra_visual: MeshInstance3D
 var _base_scale: float = 1.0
 var _shake_tween: Tween
+var _visual_stage := -1
 
 
 func setup_tree(total: int, regrow_time: float, variant_index: int, pine: bool, scale_value: float) -> void:
@@ -123,8 +124,10 @@ func is_available() -> bool:
 	return is_harvestable() and reservations < max_reservations
 
 
+## Claims a work slot. Does not require stock: a villager acting on old
+## knowledge may claim and walk to a node that turns out to be empty.
 func reserve() -> bool:
-	if not is_available():
+	if reservations >= max_reservations or not is_inside_tree():
 		return false
 	reservations += 1
 	return true
@@ -162,7 +165,11 @@ func sim_tick(dt: float) -> void:
 				_regrow_timer = 0.0
 				_update_visual()
 			elif amount == 0:
-				_update_visual()
+				# Only touch the visual when the sapling's growth stage changes.
+				var stage := int(get_regrow_progress() * 10.0)
+				if stage != _visual_stage:
+					_visual_stage = stage
+					_update_visual()
 		_:
 			if _regrow_timer >= regrow_interval:
 				_regrow_timer = 0.0

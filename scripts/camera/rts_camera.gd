@@ -123,7 +123,8 @@ func _process(delta: float) -> void:
 		var speed := pan_speed * maxf(_target_distance, 15.0)
 		_target_pos += Vector3(move.x, 0, move.y) * speed * delta
 	if is_following():
-		_target_pos = Vector3(_follow.global_position.x, 0, _follow.global_position.z)
+		var fp: Vector3 = _follow.get_visual_position() if _follow.has_method(&"get_visual_position") else _follow.global_position
+		_target_pos = Vector3(fp.x, 0, fp.z)
 	elif _follow != null:
 		_follow = null
 

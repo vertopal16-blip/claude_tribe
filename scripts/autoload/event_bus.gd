@@ -14,6 +14,10 @@ signal villager_died(villager: Node, cause: String)
 ## "villager_id", "time", "day" and "position". Intended consumers: a future
 ## per-villager memory system, statistics and save files.
 signal villager_event(villager: Node, event_name: StringName, data: Dictionary)
+## A villager formed a memory (social layer). `record` is MemoryRecord.to_dict().
+signal social_event(villager: Node, kind: StringName, record: Dictionary)
+## A conversation completed and its (validated) outcome was applied.
+signal conversation_finished(outcome: Dictionary)
 signal building_placed(building: Node)
 signal building_completed(building: Node)
 signal building_removed(building: Node)

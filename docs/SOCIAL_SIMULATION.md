@@ -1,10 +1,9 @@
-# Future Milestone: Emergent Personalities and Social Simulation
+# Emergent Personalities and Social Simulation
 
-> **Status: specified, NOT implemented.** This document preserves the design
-> for a later milestone. The current game only contains the foundational
-> gameplay systems, plus the architectural seams listed in
-> [Existing seams](#existing-seams-in-the-codebase) so this can be added
-> without a rewrite.
+> **Status: implemented (first version).** Sections 1–3 are the original
+> specification and design. [Section 7](#7-what-is-implemented) describes
+> what is actually built, and [section 8](#8-not-yet-implemented) lists what
+> is still open.
 
 ---
 
@@ -209,25 +208,18 @@ Two layers, strictly separated:
 
 ---
 
-## 5. Gaps to close before or at the start of this milestone
+## 5. Foundation gaps (status)
 
-1. **Full determinism.** Movement integrates per *frame* (scaled delta), so
-   positions, and therefore later decisions, vary slightly with frame rate.
-   Fix: advance movement in fixed sim steps and interpolate visuals only. This
-   is required for replay-style tests of emergent behaviour.
-2. **Persistence.** There is no save/load yet. Add a `to_dict()` /
-   `from_dict()` per system, keyed by stable ids. Social state must be included.
-3. **Probabilistic choice.** The brain picks the highest score plus a small
-   jitter. Switch to seeded weighted sampling over the top candidates once
-   traits exist.
-4. **Blacklist ids.** `VillagerBrain` uses instance ids for its unreachable
-   list. Move it to `entity_id` when it becomes part of persistent memory.
-5. **Spatial index.** Extract the villager spatial hash from the tribe's
-   separation code into a reusable index for proximity queries.
+1. **Full determinism.** Done: simulation time advances in whole ticks, and
+   movement runs in fixed steps with interpolated visuals (state hash identical
+   at 60 and 23 fps).
+2. **Persistence.** Partly done: social state serializes; the rest of the world does not yet.
+3. **Probabilistic choice.** Done: seeded weighted sampling among near-best goals.
+4. **Blacklist ids.** Still uses instance ids (runtime-only, not persisted).
+5. **Spatial index.** Done: `Tribe.villagers_near()` (rebuilt each tick)
+   and `ResourceRegistry.nodes_near()`.
 
----
-
-## 6. Suggested implementation order
+## 6. Original implementation order (followed)
 
 1. Determinism plus save/load foundations (section 5, items 1–2).
 2. Personality data, `PersonalityModifier` and weighted sampling.
@@ -240,3 +232,46 @@ Two layers, strictly separated:
 6. Conversation system (deterministic outcomes, template text).
 7. Emergent settlement scoring and building ownership.
 8. Optional generative dialogue renderer behind the intent-validation layer.
+
+---
+
+## 7. What is implemented
+
+All code lives in `scripts/social/` plus the new villager tasks. Everything is
+deterministic (seeded) and runs without any language model.
+
+| Area | Implementation |
+|---|---|
+| **Personality** | `Personality`: 10 traits generated from `social_seed` (0 = world seed) and the villager id. Traits drift by at most ±0.2 from the inborn value through experiences (`MemoryPolicy.TRAIT_DRIFT`). `compatibility()` measures how well two temperaments get along. |
+| **Probabilistic decisions** | `PersonalityModifier` and `SocialModifier` (mood) bias goal scores. Non-urgent choices are sampled (seeded) among goals scoring within 80% of the best, so traits shift behaviour without scripting it. Urgent needs (score ≥ 0.8) stay deterministic. |
+| **Memory** | `VillagerMemory`: at most 24 short-term and 16 long-term records. Repeats merge into one record with a count. Salience decays (fast short-term, slow long-term). Only important or often-repeated experiences are promoted. Mood comes from salient memories. |
+| **Experiences → relationships** | `SocialSystem.remember()` is the single path: memory record + opinion change (scaled by empathy and trust) + familiarity + trait drift + bond re-evaluation. Rules live in `MemoryPolicy`. |
+| **Relationships** | `RelationshipGraph`: directional affinity and trust, mutual familiarity, and tags (kin, partner, friend, rival). Friends, rivals and partners emerge from thresholds, and partnerships require mutual affection plus familiarity. Founders start with two couples and one pair of siblings. |
+| **Knowledge** | Villagers only use resource locations they have seen (14 m perception, refreshed as they move) or been told about. Facts are snapshots and can be stale. Arriving at an emptied place someone told you about creates a "misled" memory toward that person. When the tribe needs a resource nobody knows of, villagers explore. |
+| **Conversations** | `ConversationSystem` pairs idle or lonely villagers. `SocializeTask` actively walks to someone the villager likes, and the other decides whether to stop and talk. Topics: small talk, sharing a location, asking for food, offering food, consoling, gossip, insults or arguments, and flirting. The choice weighs both personalities, relationship, mood, needs and what each actually knows. Speech bubbles show the lines. |
+| **Validation boundary** | A conversation's result is a `ConversationOutcome` (plain data). It is applied only after `validate()` checks it against the live state: the speaker must hold the fact, the giver must carry the food, and both must be alive. Tests confirm that invented facts or food are rejected. This is the hook for any future generative dialogue. |
+| **Crises** | Starving villagers ask people carrying food for help (`AskFoodTask`). Caring villagers bring food to hungry friends (`HelpTask`), and gatherers reconsider on the way home. Refusals and help become strong memories. Deaths create grief for partners, family and friends, "saw death" memories for witnesses, and consoling conversations. |
+| **Loneliness** | A social need (faster for sociable villagers), eased by conversation and by evenings at the campfire. |
+| **Emergent settlement** | Every household wants its own home. `SettlementPlanner` builds for a specific villager (couples first, then the most ambitious), scoring sites from their point of view: near people they like, away from rivals, central or remote by independence, and near the resources they work with. Homes are owned (`Building.owner_ids`), and partners move in together. The same world with a different `social_seed` grows a different village (tested). |
+| **Determinism** | Simulation time advances only in fixed ticks, and movement runs in ticks with interpolated visuals. The same seed produces the same state hash at different frame rates (tested at 60 and 23 fps). |
+| **Persistence (social)** | `SocialSystem.to_dict()` / `load_dict()` cover the graph, personalities, memories, knowledge and loneliness (round-trip tested). |
+| **UI** | The villager panel shows personality words, mood, partner, family, friends, rivals, known places, notable memories and a Company bar. Building panels show who a home belongs to. Social notifications appear in purple. |
+
+## 8. Not yet implemented
+
+- **Full save/load of the world.** Only social state serializes; terrain is
+  regenerated from the seed, but buildings, resource amounts, inventories and
+  running tasks are not saved yet.
+- **Births and families growing.** `Tribe.add_villager()` is ready, and kin
+  edges and trait inheritance would hook in there.
+- **Generative dialogue.** Lines come from templates in `DialogueRenderer`.
+  A language model could replace the renderer, or propose outcomes through
+  `ConversationOutcome.validate()`, but never change state directly.
+- **Social groups as a concept.** Clusters of mutual friends exist implicitly
+  but aren't named, shown or used by the AI.
+- **Ambitions / personal goals** beyond the ambition trait's effect on
+  building and on who gets the next home.
+- **Performance at scale.** With 208 villagers the mean simulation tick is
+  about 11 ms (about 4.5 ms before the social layer). The settlement planner
+  can cause a one-off spike of about 40 ms when choosing a home site, which
+  could be spread over several ticks.

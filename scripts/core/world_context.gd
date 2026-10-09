@@ -8,6 +8,7 @@ var terrain: Terrain
 var nav: NavGrid
 var resources: ResourceRegistry
 var tribe: Tribe
+var social: SocialSystem
 var rng: RandomNumberGenerator
 ## Node under which world entities (villagers, buildings, nodes) are spawned.
 var world_root: Node3D

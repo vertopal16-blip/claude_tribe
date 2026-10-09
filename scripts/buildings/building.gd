@@ -17,6 +17,10 @@ var work_done := 0.0
 var builders := 0
 var placed_by_player := false
 var sleepers: Array[Node] = []
+## Villagers this home was built for (they get first claim on its beds).
+var owner_ids: Array[int] = []
+## Villagers who delivered materials or worked on construction.
+var contributor_ids: Array[int] = []
 
 var _model: MeshInstance3D
 var _scaffold: MeshInstance3D
@@ -128,7 +132,8 @@ func cancel_delivery(type: int, n: int) -> void:
 
 
 ## Accepts up to `n` units of a reserved delivery. Returns how many were used.
-func complete_delivery(type: int, n: int) -> int:
+func complete_delivery(type: int, n: int, by_id: int = -1) -> int:
+	_add_contributor(by_id)
 	cancel_delivery(type, n)
 	var used := mini(n, remaining_to_deliver(type))
 	delivered[type] = int(delivered.get(type, 0)) + used
@@ -151,9 +156,10 @@ func work_progress() -> float:
 
 
 ## Adds construction work. Returns true when this call finished the building.
-func add_work(amount: float) -> bool:
+func add_work(amount: float, by_id: int = -1) -> bool:
 	if is_complete or not materials_complete():
 		return false
+	_add_contributor(by_id)
 	work_done += amount
 	_refresh_visuals()
 	if work_done >= def.build_work:
@@ -162,6 +168,11 @@ func add_work(amount: float) -> bool:
 		completed.emit(self)
 		return true
 	return false
+
+
+func _add_contributor(id: int) -> void:
+	if id >= 0 and not contributor_ids.has(id):
+		contributor_ids.append(id)
 
 
 ## Materials delivered so far (used to refund a cancelled site).

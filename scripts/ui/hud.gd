@@ -37,6 +37,7 @@ var _sel_title: Label
 var _sel_subtitle: Label
 var _sel_bars: Dictionary = {}
 var _sel_info: Label
+var _sel_social: Label
 var _sel_follow: Button
 var _sel_cancel: Button
 var _selected: Node3D
@@ -296,6 +297,7 @@ func _add_notification(text: String, kind: StringName) -> void:
 		&"warning": color = Color(1.0, 0.75, 0.4)
 		&"death": color = Color(1.0, 0.5, 0.45)
 		&"build": color = Color(0.7, 0.95, 0.6)
+		&"social": color = Color(0.85, 0.72, 1.0)
 	var panel := PanelContainer.new()
 	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	panel.add_theme_stylebox_override("panel", _box(Color(0.05, 0.06, 0.06, 0.7), 8, Color.TRANSPARENT, 6))
@@ -331,7 +333,7 @@ func _build_selection_panel() -> void:
 	_sel_subtitle = _label("", 13, C_MUTED)
 	col.add_child(_sel_title)
 	col.add_child(_sel_subtitle)
-	for key in [&"health", &"satiety", &"energy", &"amount", &"progress"]:
+	for key in [&"health", &"satiety", &"energy", &"company", &"amount", &"progress"]:
 		var row := HBoxContainer.new()
 		var cap := _label(String(key).capitalize(), 13, C_MUTED)
 		cap.custom_minimum_size.x = 70
@@ -346,6 +348,7 @@ func _build_selection_panel() -> void:
 		match key:
 			&"satiety": fill_color = Color(0.92, 0.6, 0.35)
 			&"energy": fill_color = Color(0.45, 0.7, 0.95)
+			&"company": fill_color = Color(0.75, 0.55, 0.9)
 			&"amount": fill_color = Color(0.85, 0.75, 0.45)
 			&"progress": fill_color = Color(0.9, 0.72, 0.36)
 		bar.add_theme_stylebox_override("fill", _box(fill_color, 4, Color.TRANSPARENT, 0))
@@ -356,6 +359,10 @@ func _build_selection_panel() -> void:
 	_sel_info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_sel_info.custom_minimum_size.x = 300
 	col.add_child(_sel_info)
+	_sel_social = _label("", 13, Color(0.86, 0.82, 0.95))
+	_sel_social.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_sel_social.custom_minimum_size.x = 300
+	col.add_child(_sel_social)
 	var buttons := HBoxContainer.new()
 	buttons.add_theme_constant_override("separation", 6)
 	_sel_follow = _button("Follow", _toggle_follow, "Camera follows this villager (F)")
@@ -391,6 +398,7 @@ func _refresh_selection() -> void:
 		_set_bar(k, false)
 	_sel_follow.visible = false
 	_sel_cancel.visible = false
+	_sel_social.visible = false
 	if _selected is Villager:
 		var v := _selected as Villager
 		_sel_title.text = v.villager_name
@@ -398,9 +406,12 @@ func _refresh_selection() -> void:
 		_set_bar(&"health", true, v.needs.health)
 		_set_bar(&"satiety", true, 100.0 - v.needs.hunger)
 		_set_bar(&"energy", true, v.needs.energy)
+		_set_bar(&"company", true, 100.0 - v.needs.social)
 		var home := "Campfire"
 		if v.home != null and is_instance_valid(v.home):
-			home = "Hut"
+			home = "Own hut" if v.home.owner_ids.has(v.villager_id) else "Hut"
+		_sel_social.text = _social_summary(v)
+		_sel_social.visible = true
 		_sel_info.text = "State: %s\nActivity: %s\nCarrying: %s (capacity %d)\nSleeps at: %s" % [
 			VillagerState.label(v.state), v.get_task_description(), v.inventory.describe(), v.inventory.capacity, home]
 		_sel_follow.visible = true
@@ -425,7 +436,39 @@ func _refresh_selection() -> void:
 			extra = "\nFood %d  ·  Wood %d  ·  Stone %d" % [s.get_amount(ResourceType.FOOD), s.get_amount(ResourceType.WOOD), s.get_amount(ResourceType.STONE)]
 		elif not b.is_complete:
 			extra = "\nBuilders working: %d / %d" % [b.builders, b.def.max_builders]
+		if not b.owner_ids.is_empty():
+			extra += "\nHome of: %s" % _names(b.owner_ids)
 		_sel_info.text = b.describe_status() + extra
+
+
+func _names(ids: Array) -> String:
+	var out: PackedStringArray = []
+	for id in ids:
+		out.append(ctx.social.name_of(id))
+	return ", ".join(out) if not out.is_empty() else "none"
+
+
+func _social_summary(v: Villager) -> String:
+	var social := ctx.social
+	var id := v.villager_id
+	var mood := v.memory.mood()
+	var lines: PackedStringArray = []
+	lines.append("Personality: " + "  ·  ".join(v.personality.descriptors()))
+	lines.append("Mood: %s" % SocialSystem.mood_label(mood))
+	var partner := social.partner_of(id)
+	var family := social.kin_of(id)
+	var rel := "Partner: %s" % (social.name_of(partner) if partner >= 0 else "none")
+	if not family.is_empty():
+		rel += "   Family: %s" % _names(family)
+	lines.append(rel)
+	lines.append("Friends: %s   Rivals: %s" % [_names(social.friends_of(id)), _names(social.rivals_of(id))])
+	lines.append("Knows %d places" % v.knowledge.store.size())
+	var notable := v.memory.notable(3)
+	if not notable.is_empty():
+		lines.append("Remembers:")
+		for r in notable:
+			lines.append("  • " + MemoryPolicy.describe(r, social.name_of))
+	return "\n".join(lines)
 
 
 func _toggle_follow() -> void:

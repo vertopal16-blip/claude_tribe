@@ -68,6 +68,13 @@ extends Resource
 @export var starvation_damage: float = 0.6
 @export var exhaustion_damage: float = 0.15
 
+@export_group("Social")
+## 0 = derive from world_seed. Same world_seed with a different social_seed
+## gives the same valley with different people.
+@export var social_seed: int = 0
+## Loneliness gained per sim-second for an average villager (0..100 scale).
+@export var loneliness_rate: float = 0.24
+
 @export_group("Simulation")
 @export var sim_tick_interval: float = 0.25
 @export var max_ticks_per_frame: int = 8
@@ -77,7 +84,7 @@ extends Resource
 @export_group("Performance")
 ## New task decisions (which include pathfinding) allowed per simulation tick
 ## across the whole tribe. Spreads out bursts such as everyone waking up.
-@export var max_decisions_per_tick: int = 16
+@export var max_decisions_per_tick: int = 8
 @export var grass_instances: int = 9000
 @export var flower_instances: int = 900
 @export var pebble_instances: int = 700

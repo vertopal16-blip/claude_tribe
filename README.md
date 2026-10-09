@@ -69,8 +69,13 @@ scripts/
               resource_node.gd, resource_registry.gd, resource_type.gd, day_night_cycle.gd
   villager/   villager.gd (composition root) + villager_needs / _inventory / _movement /
               _brain / _state / _knowledge, decision_modifier.gd, habit_modifier.gd
-              tasks/  villager_task.gd base + gather, eat, rest, build, deliver, idle
+              tasks/  villager_task.gd base + gather, eat, rest, build, deliver, idle,
+                      socialize, converse, explore, help, ask_food
   tribe/      tribe.gd (villagers, demand, housing), settlement_planner.gd, stockpile.gd
+  social/     social_system.gd, personality.gd, villager_memory.gd, memory_record.gd,
+              memory_policy.gd, relationship_graph.gd, knowledge_store.gd,
+              conversation_system.gd, conversation_outcome.gd, dialogue_renderer.gd,
+              personality_modifier.gd, social_modifier.gd
   buildings/  building_def.gd (data), building_catalog.gd, building.gd
   camera/     rts_camera.gd
   interaction/world_interaction.gd  raycast selection + placement ghost
@@ -108,13 +113,16 @@ Key design points:
   decoration, an integer flood fill for connectivity, bounded path smoothing, spatial-hash
   crowd separation. Counts and limits are in `GameConfig` (Performance group).
 
-## Roadmap
+## Social simulation
 
-The next major system — individual personalities, memory, relationships,
-contextual conversations and emergent settlement layout — is specified in
-[docs/FUTURE_SOCIAL_SIMULATION.md](docs/FUTURE_SOCIAL_SIMULATION.md). It is
-**not implemented yet**; the document lists the seams in the current code it
-will plug into.
+Every villager has a personality (10 traits), a bounded memory, opinions of
+everyone else, and only the knowledge they have actually gained. They talk,
+share discoveries, gossip, argue, flirt, help each other in hard times and
+grieve their dead. Friendships, rivalries and couples emerge, homes are built
+for specific households, and the layout of the village follows who likes whom.
+Select a villager to see their personality, mood, relationships and memories.
+
+Details, design and open points: [docs/SOCIAL_SIMULATION.md](docs/SOCIAL_SIMULATION.md).
 
 ## Tests
 
@@ -126,7 +134,10 @@ day/night.
 ```bash
 godot --headless --path . res://tests/sim_test.tscn --fixed-fps 60 -- --seed=1234 --days=4
 godot --headless --path . res://tests/sim_test.tscn --fixed-fps 60 -- --seed=5 --days=3 --starve           # deaths
+godot --headless --path . res://tests/sim_test.tscn --fixed-fps 60 -- --seed=11 --days=6 --scarce           # food crisis
 godot --headless --path . res://tests/sim_test.tscn --fixed-fps 60 -- --days=1.5 --extra-villagers=200     # perf
+godot --headless --path . res://tests/sim_test.tscn --fixed-fps 23 -- --seed=1234 --hash-at-tick=2400      # determinism: same hash at any fps
+godot --headless --path . res://tests/sim_test.tscn --fixed-fps 60 -- --days=4 --social-seed=7 --layout    # village layout per social seed
 ```
 
 Screenshots (needs a display or `xvfb-run`):

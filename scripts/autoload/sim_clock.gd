@@ -21,8 +21,11 @@ var day_length: float = 240.0
 ## Fraction of a day (0 = midnight) at which the simulation starts.
 var start_time_of_day: float = 0.29
 
-## Total simulated seconds since the world started.
+## Total simulated seconds since the world started. Advances only in whole
+## ticks, so everything the simulation reads is independent of frame rate.
 var sim_time: float = 0.0
+## Number of simulation ticks run so far.
+var tick_count: int = 0
 var _accumulator: float = 0.0
 var _last_day: int = -1
 
@@ -38,6 +41,7 @@ func configure(config: Resource) -> void:
 	day_length = maxf(10.0, config.day_length_seconds)
 	start_time_of_day = clampf(config.start_time_of_day, 0.0, 0.999)
 	sim_time = 0.0
+	tick_count = 0
 	_accumulator = 0.0
 	_last_day = get_day()
 
@@ -45,13 +49,13 @@ func configure(config: Resource) -> void:
 func _process(delta: float) -> void:
 	if paused:
 		return
-	var sd := delta * time_scale
-	sim_time += sd
-	_accumulator += sd
+	_accumulator += delta * time_scale
 	var ticks := 0
 	while _accumulator >= tick_interval and ticks < max_ticks_per_frame:
 		_accumulator -= tick_interval
 		ticks += 1
+		sim_time += tick_interval
+		tick_count += 1
 		sim_tick.emit(tick_interval)
 	if ticks >= max_ticks_per_frame:
 		# Drop the backlog instead of spiralling when the machine can't keep up.
@@ -60,6 +64,12 @@ func _process(delta: float) -> void:
 	if day != _last_day:
 		_last_day = day
 		day_started.emit(day)
+
+
+## Progress (0..1) from the last tick towards the next; used to interpolate
+## visuals smoothly between fixed simulation steps.
+func get_tick_alpha() -> float:
+	return clampf(_accumulator / tick_interval, 0.0, 1.0)
 
 
 func scaled_delta(real_delta: float) -> float:

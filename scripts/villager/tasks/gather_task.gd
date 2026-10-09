@@ -7,6 +7,8 @@ enum Step { TO_RESOURCE, GATHERING, TO_STOCKPILE, DELIVERING }
 
 const NEARBY_SEARCH := 14.0
 const DELIVER_TIME := 0.6
+## Distance at which a villager notices a target has been emptied.
+const SIGHT_RANGE := 10.0
 
 var resource_type: int
 var node: ResourceNode
@@ -54,7 +56,12 @@ func _release() -> void:
 func tick(dt: float) -> int:
 	match step:
 		Step.TO_RESOURCE:
-			if not is_instance_valid(node) or not node.is_harvestable():
+			if not is_instance_valid(node):
+				_release()
+				return _next_source_or_return()
+			if not node.is_harvestable() and _distance_flat(villager.global_position, node.global_position) < SIGHT_RANGE:
+				# Close enough to see it has been emptied since we last heard of it.
+				villager.knowledge.verify(node)
 				_release()
 				return _next_source_or_return()
 			match villager.movement.status:
@@ -74,6 +81,7 @@ func tick(dt: float) -> int:
 		Step.GATHERING:
 			villager.activity = 1.0
 			if not is_instance_valid(node) or not node.is_harvestable():
+				villager.knowledge.verify(node)
 				_release()
 				return _next_source_or_return()
 			_timer += dt * villager.needs.performance()
@@ -112,6 +120,10 @@ func _next_source_or_return() -> int:
 
 
 func _start_return() -> int:
+	# Carrying food home while someone we care about is going hungry: stop and
+	# let the brain weigh helping them against delivering to the stockpile.
+	if resource_type == ResourceType.FOOD and ctx.social.find_person_to_help(villager) != null:
+		return Status.SUCCEEDED
 	step = Step.TO_STOCKPILE
 	villager.set_state(VillagerState.RETURNING)
 	if not _go_to_stockpile():

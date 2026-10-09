@@ -56,7 +56,9 @@ func tick(dt: float) -> int:
 		if _timer < EAT_TIME:
 			return Status.RUNNING
 		return _consume()
-	if source == Source.BUSH and (not is_instance_valid(bush) or not bush.is_harvestable()):
+	if source == Source.BUSH and (not is_instance_valid(bush) or (not bush.is_harvestable()
+			and _distance_flat(villager.global_position, bush.global_position) < GatherTask.SIGHT_RANGE)):
+		villager.knowledge.verify(bush)
 		_release()
 		return Status.SUCCEEDED if not villager.needs.is_hungry() else _retry_bush()
 	match villager.movement.status:

@@ -84,6 +84,14 @@ func _ready() -> void:
 	EventBus.notify("%s has settled in the valley. Population: %d." % [tribe.tribe_name, tribe.population()])
 
 
+func _exit_tree() -> void:
+	# Break RefCounted cycles (context <-> social systems) so nothing leaks on quit.
+	if ctx.social:
+		ctx.social.conversations.social = null
+		ctx.social.ctx = null
+	ctx.social = null
+
+
 func _setup_lighting() -> void:
 	var sky_mat := ProceduralSkyMaterial.new()
 	sky_mat.sun_angle_max = 20.0
