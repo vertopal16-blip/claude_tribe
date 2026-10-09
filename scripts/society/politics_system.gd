@@ -27,6 +27,8 @@ var endorsements: Dictionary = {}
 var disputes: Array = []
 var transitions := 0
 var mediations := 0
+var _approval_cache: Dictionary = {}
+var _overthrow := false
 var _timer := 0.0
 
 
@@ -93,8 +95,10 @@ func influence(v: Villager) -> float:
 			+ v.skills.get_level(&"persuasion") * 0.2
 	if is_leader(v):
 		inf += 15.0
-	if v.life_stage() == &"elder":
-		inf += 8.0 * society.culture.norm(&"tradition")
+	# Culture decides whose voice carries: elders, achievers, big families.
+	inf += society.culture.elder_influence(v)
+	inf += v.prestige * 0.4 * maxf(0.0, society.culture.tribe_value(&"achievement"))
+	inf += social.kin_of(v.villager_id).size() * 3.0 * maxf(0.0, society.culture.tribe_value(&"family"))
 	return inf
 
 
@@ -119,7 +123,9 @@ func follows_decisions(v: Villager) -> bool:
 		return true
 	var g := society.ctx.social.graph
 	var leader := leaders[0]
-	return v.villager_id == leader or g.trust(v.villager_id, leader) >= 0.4 or v.personality.get_trait(&"loyalty") > 0.6
+	var deference := society.culture.value(v, &"hierarchy") * 0.3 + society.culture.value(v, &"loyalty") * 0.2 \
+			- society.culture.value(v, &"independence") * 0.2
+	return v.villager_id == leader or g.trust(v.villager_id, leader) + deference >= 0.4 or v.personality.get_trait(&"loyalty") > 0.6
 
 
 # --------------------------------------------------------------------------
@@ -260,12 +266,14 @@ func _prestige_drift() -> void:
 
 func _on_leader_lost(id: int) -> void:
 	var name := society.ctx.social.name_of(id)
+	society.culture.on_leader_gone(id, float(_approval_cache.get(id, 0.0)), name, true)
 	if government in [&"chief", &"hereditary"]:
-		# Lineage tradition: an adult child takes over.
-		if society.culture.has_tradition(&"lineage"):
+		# Hereditary custom: an adult child takes over.
+		if society.culture.hereditary():
 			for cid in society.demographics.children_of(id):
 				var c := _villager(cid)
 				if c != null and c.is_adult():
+					society.culture._practise(&"hereditary", [cid])
 					_set_government(&"hereditary", [cid], "%s succeeded their parent %s as chief." % [c.villager_name, name])
 					return
 		_set_government(&"none", [], "With %s gone, the tribe has no chief." % name)
@@ -281,12 +289,25 @@ func _update_government() -> void:
 	ranked.sort_custom(func(a, b): return influence(a) > influence(b))
 	if ranked.is_empty():
 		return
-	# Council: needs a meeting place, enough people and a consensus-minded culture.
-	if government != &"council" and pop >= 16 and _has(&"longhouse") and society.culture.norm(&"consensus") >= 0.55:
+	for v in ranked:
+		if is_leader(v):
+			_approval_cache[v.villager_id] = approval(v)
+	# Council: needs a meeting place (or a custom of elders deciding), enough
+	# people and a culture that favours deciding together.
+	var elders_rule := society.culture.elder_council()
+	if government != &"council" and pop >= 16 and (_has(&"longhouse") or _has(&"gathering_circle") or elders_rule) \
+			and society.culture.council_favoured():
+		var pool: Array = ranked
+		if elders_rule:
+			pool = ranked.filter(func(v): return v.life_stage() == &"elder")
+			if pool.size() < 2:
+				pool = ranked.duplicate()
+				pool.sort_custom(func(a, b): return a.age_years > b.age_years)
 		var members: Array[int] = []
-		for v in ranked.slice(0, mini(5, maxi(3, adults / 4))):
+		for v in pool.slice(0, mini(5, maxi(3, adults / 4))):
 			members.append(v.villager_id)
-		_set_government(&"council", members, "The tribe formed a council of %s to decide together." % _names(members))
+		_set_government(&"council", members, ("The elders %s now decide for the tribe, as custom demands." if elders_rule
+				else "The tribe formed a council of %s to decide together.") % _names(members))
 		return
 	if government == &"council":
 		_refresh_council(ranked)
@@ -299,7 +320,7 @@ func _update_government() -> void:
 	var crisis := tribe.stockpile.get_amount(ResourceType.FOOD) < pop * 3
 	if government in [&"none", &"informal"] and (pop >= 12 or crisis):
 		for c in candidates:
-			if endorsers(c.villager_id) * 2 > adults:
+			if endorsers(c.villager_id) > adults * society.culture.election_share():
 				_set_government(&"chief", [c.villager_id], "%s was chosen as chief by the tribe." % c.villager_name)
 				society.culture.shift(&"hierarchy", 0.05, "the tribe chose a chief")
 				return
@@ -314,6 +335,8 @@ func _update_government() -> void:
 			# A challenger with more backing than the chief takes over.
 			if (appr < 0.0 or crisis) and endorsers(c.villager_id) > endorsers(chief.villager_id) and endorsers(c.villager_id) * 3 > adults:
 				society.ctx.social.remember(chief, &"lost_leadership", -1, -1, -1, "chief")
+				society.culture.on_leader_gone(chief.villager_id, appr, chief.villager_name, false)
+				_overthrow = true
 				_set_government(&"chief", [c.villager_id], "%s challenged %s and became chief." % [c.villager_name, chief.villager_name])
 				society.culture.shift(&"hierarchy", -0.04, "a chief was overthrown")
 				return
@@ -361,6 +384,8 @@ func _set_government(kind: StringName, who: Array[int], text: String) -> void:
 	since_day = SimClock.get_day()
 	transitions += 1
 	society.history.add(&"leadership", text, who + old)
+	society.culture.on_government_change(kind, who, old, _overthrow)
+	_overthrow = false
 	EventBus.notify(text, &"social")
 	for id in who:
 		var v := _villager(id)

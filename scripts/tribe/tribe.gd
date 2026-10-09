@@ -46,6 +46,7 @@ var perf_total_ms := 0.0
 var perf_ticks := 0
 ## Accumulated milliseconds per tick section (whole run).
 var perf_sections: Dictionary = {}
+var perf_section_max: Dictionary = {}
 var _construction_need: Dictionary = ResourceType.empty_amounts()
 
 
@@ -159,6 +160,7 @@ func sim_tick(dt: float) -> void:
 
 func _perf_add(section: StringName, usec: int) -> void:
 	perf_sections[section] = float(perf_sections.get(section, 0.0)) + usec / 1000.0
+	perf_section_max[section] = maxf(float(perf_section_max.get(section, 0.0)), usec / 1000.0)
 
 
 ## True mean over the whole run (the overlay's avg is a moving average).

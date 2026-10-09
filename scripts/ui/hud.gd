@@ -45,6 +45,7 @@ var _refresh_timer := 0.0
 var _debug_label: Label
 var panels: SocietyPanels
 var _inspect_button: Button
+var _culture_button: Button
 var _chronicle_button: Button
 var _tribe_button: Button
 
@@ -260,7 +261,8 @@ func _build_time_panel() -> void:
 	_chronicle_button = _button("Chronicle", func(): panels.toggle_chronicle(); _refresh_view_buttons(), "Tribe history (C)")
 	_tribe_button = _button("Tribe", func(): panels.toggle_tribe(); _refresh_view_buttons(), "Government, culture, groups (T)")
 	_inspect_button = _button("Inspect", func(): panels.toggle_inspect(); _refresh_view_buttons(), "Detailed villager inspector (I)")
-	for b in [_chronicle_button, _tribe_button, _inspect_button]:
+	_culture_button = _button("Culture", func(): panels.toggle_culture(); _refresh_view_buttons(), "Values, customs, memory, language and art (K)")
+	for b in [_chronicle_button, _tribe_button, _culture_button, _inspect_button]:
 		b.toggle_mode = true
 		view_row.add_child(b)
 	col.add_child(view_row)
@@ -271,6 +273,7 @@ func _refresh_view_buttons() -> void:
 	_chronicle_button.set_pressed_no_signal(panels.is_chronicle_open())
 	_tribe_button.set_pressed_no_signal(panels.is_tribe_open())
 	_inspect_button.set_pressed_no_signal(panels.inspect_mode)
+	_culture_button.set_pressed_no_signal(panels.is_culture_open())
 
 
 func _set_speed(value: float) -> void:
@@ -560,7 +563,7 @@ func _on_placement_mode_changed(active: bool, def: BuildingDef) -> void:
 
 
 func _build_help_hint() -> void:
-	var l := _label("WASD move  ·  Wheel zoom  ·  Middle mouse / Q E rotate  ·  Left click select  ·  Space pause  ·  1-4 speed  ·  H camp  ·  I inspect  ·  C chronicle  ·  T tribe", 12, Color(1, 1, 1, 0.55))
+	var l := _label("WASD move  ·  Wheel zoom  ·  Middle mouse / Q E rotate  ·  Left click select  ·  Space pause  ·  1-4 speed  ·  H camp  ·  I inspect  ·  C chronicle  ·  T tribe  ·  K culture", 12, Color(1, 1, 1, 0.55))
 	_anchor(l, Control.PRESET_CENTER_BOTTOM, 10)
 
 
@@ -632,6 +635,9 @@ func _unhandled_input(event: InputEvent) -> void:
 		_refresh_view_buttons()
 	elif event.is_action_pressed(&"toggle_tribe"):
 		panels.toggle_tribe()
+		_refresh_view_buttons()
+	elif event.is_action_pressed(&"toggle_culture"):
+		panels.toggle_culture()
 		_refresh_view_buttons()
 	elif event.is_action_pressed(&"toggle_debug"):
 		var panel := _debug_label.get_parent() as Control

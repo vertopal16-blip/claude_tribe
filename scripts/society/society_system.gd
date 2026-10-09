@@ -51,16 +51,24 @@ func tick(dt: float) -> void:
 
 
 func _on_social_event(_v: Node, kind: StringName, _record: Dictionary) -> void:
-	culture.on_social_event(kind)
+	culture.on_social_event(_v as Villager, kind, _record)
 	match kind:
 		&"helped": politics.add_prestige(_v as Villager, 0.6)
 		&"fought": politics.add_prestige(_v as Villager, -2.0)
 		&"mediated": politics.mediations += 1
 
 
+func _first_harvest() -> bool:
+	var n := 0
+	for b in ctx.tribe.buildings:
+		n += b.harvests
+	return n <= 1
+
+
 func on_villager_added(v: Villager) -> void:
 	demographics.register_name(v.villager_name)
 	demographics.record_parents(v.villager_id, v.parent_ids)
+	culture.register(v)
 
 
 func on_villager_died(v: Villager, cause: String) -> void:
@@ -76,12 +84,13 @@ func on_skill_mastered(v: Villager, skill: StringName) -> void:
 
 func on_building_completed(b: Building) -> void:
 	proposals.on_building_completed(b)
+	culture.on_building_completed(b)
 	if b.def.id != &"hut":
 		history.add(&"construction", "A %s now stands in the settlement." % b.def.display_name.to_lower(), b.contributor_ids)
 
 
 func on_harvest(v: Villager, site: Building, food: int) -> void:
-	culture.on_harvest()
+	culture.on_harvest(v, food, site.harvests == 1 and _first_harvest())
 	if site.harvests == 1:
 		history.add(&"economy", "%s brought in the first harvest from the new farm (%d food)." % [v.villager_name, food], [v.villager_id])
 
@@ -215,8 +224,7 @@ func add_topics(s: Villager, l: Villager, w: Dictionary, data: Dictionary) -> vo
 		w[&"endorse"] = 0.4 + (0.8 if candidate == s.villager_id else 0.2)
 	if not economy.is_communal() and s.tool_durability <= 0.0 and int(economy.private_tools.get(l.villager_id, 0)) > 0:
 		w[&"trade"] = 1.5
-	if not culture.traditions.is_empty() and l.is_adult():
-		w[&"tradition"] = 0.25 + s.personality.get_trait(&"loyalty") * 0.3
+	culture.add_topics(s, l, w, data)
 	if pending_mediation.has(s.villager_id):
 		w[&"mediate"] = 50.0
 

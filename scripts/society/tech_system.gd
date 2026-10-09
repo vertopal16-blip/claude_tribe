@@ -107,6 +107,7 @@ func _discover(v: Villager, tech: StringName) -> void:
 		lost.erase(tech)
 		discovered[tech] = {"by": v.villager_id, "day": SimClock.get_day()}
 		society.history.add(&"discovery", "%s %sdiscovered %s!" % [v.villager_name, "re" if again else "", label], [v.villager_id])
+		society.culture.on_discovery(v, tech, label)
 		EventBus.notify("%s discovered %s!" % [v.villager_name, label], &"build")
 	else:
 		society.history.add(&"discovery", "%s worked out %s independently." % [v.villager_name, label], [v.villager_id])

@@ -67,7 +67,8 @@ func attraction(a: Villager, b: Villager) -> float:
 	if not eligible(a) or not eligible(b) or not _drawn_to(a, b) or g.is_kin(ia, ib):
 		return 0.0
 	var age_gap := absf(a.age_years - b.age_years)
-	var value := spark(ia, ib) * 0.6 + a.personality.compatibility(b.personality) * 0.25 \
+	var shared := (social.ctx.society.culture.similarity(a, b) - 0.5) * 0.15 if social.ctx.society else 0.0
+	var value := shared + spark(ia, ib) * 0.6 + a.personality.compatibility(b.personality) * 0.25 \
 			+ clampf(g.respect(ia, ib), 0.0, 1.0) * 0.1 + (1.0 - clampf(age_gap / 25.0, 0.0, 1.0)) * 0.15 - 0.05
 	# Big age gaps rarely spark romance (an elder and a youth of sixteen).
 	value *= 1.0 - clampf((age_gap - 12.0) / 25.0, 0.0, 0.75)
@@ -322,7 +323,9 @@ func tick(dt: float) -> void:
 				and g.set_tag(v.villager_id, pid, &"spouse", true):
 			social.ctx.society.history.add(&"romance", "%s and %s are now lifelong partners." % [v.villager_name, p.villager_name],
 					[v.villager_id, pid])
-		if (mutual < -0.05 or grudge > 0.65) and social.rng.randf() < 0.5:
+		# Loyal, family-minded people and those who swore vows hold on longer.
+		var hold := social.ctx.society.culture.bond_tolerance(v.villager_id, pid) if social.ctx.society else 0.0
+		if (mutual < -0.05 - hold * 0.5 or grudge > 0.65 + hold * 0.4) and social.rng.randf() < 0.5:
 			break_up(v, p, "too much bad blood" if grudge > 0.65 else "they grew apart")
 
 

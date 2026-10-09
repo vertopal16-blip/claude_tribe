@@ -67,6 +67,10 @@ var _prev_pos := Vector3.ZERO
 var _cur_pos := Vector3.ZERO
 var _bubble: Label3D
 var _bubble_time := 0.0
+## Cultural adornment (sash, headband, belt) - see CultureSystem.
+var adornment: Dictionary = {}
+var _adorn: MeshInstance3D
+var _adorn_key := ""
 
 
 func setup(context: WorldContext, id: int, display_name: String, age: float, tunic: Color, hair: Color,
@@ -93,6 +97,7 @@ func setup(context: WorldContext, id: int, display_name: String, age: float, tun
 	brain.add_modifier(SocialModifier.new())
 	brain.add_modifier(EmotionModifier.new())
 	brain.add_modifier(ProfessionModifier.new())
+	brain.add_modifier(CultureModifier.new())
 
 
 func _ready() -> void:
@@ -234,7 +239,7 @@ func work_efficiency(skill: StringName) -> float:
 		e *= 1.35
 	e *= 1.0 - 0.25 * emotions.get_value(&"stress")
 	if ctx.society:
-		e *= ctx.society.groups.guild_bonus(self)
+		e *= ctx.society.groups.guild_bonus(self) * ctx.society.culture.efficiency_bonus(self, skill)
 	return e
 
 
@@ -281,6 +286,28 @@ func update_age_visual() -> void:
 		hair = hair_color.lerp(Color(0.82, 0.82, 0.8), clampf((age_years - ctx.config.elder_age) / 12.0, 0.3, 1.0))
 		hair = Color(snappedf(hair.r, 0.1), snappedf(hair.g, 0.1), snappedf(hair.b, 0.1))
 	_body.mesh = MeshFactory.villager_body(tunic_color, hair)
+
+
+## What this person wears to show the customs and roles they hold:
+## {"sash": Color, "band": Color, "belt": Color} (any may be missing).
+func set_adornment(spec: Dictionary) -> void:
+	var none := Color(0, 0, 0, 0)
+	var sash: Color = spec.get("sash", none)
+	var band: Color = spec.get("band", none)
+	var belt: Color = spec.get("belt", none)
+	var key := "%s%s%s" % [sash.to_html(), band.to_html(), belt.to_html()]
+	if key == _adorn_key:
+		return
+	_adorn_key = key
+	adornment = spec.duplicate()
+	if _body == null:
+		return
+	if _adorn == null:
+		_adorn = MeshInstance3D.new()
+		_body.add_child(_adorn)
+	_adorn.visible = not spec.is_empty()
+	if not spec.is_empty():
+		_adorn.mesh = MeshFactory.adornment(sash, band, belt)
 
 
 ## Speech bubble above the head (presentation only).

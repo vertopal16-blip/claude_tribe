@@ -70,6 +70,8 @@ func concerns(v: Villager) -> Array:
 	if _count(&"shrine") == 0 and dead >= 2:
 		out.append([&"shrine", "building", 0.2 + v.emotions.get_value(&"grief") * 0.6 + society.culture.norm(&"spirituality") * 0.4,
 				"Our dead deserve a place to be honoured."])
+	# What the tribe's culture asks for: gathering places, totems, memorials.
+	society.culture.add_concerns(v, out)
 	return out
 
 
@@ -101,13 +103,16 @@ func _maybe_propose() -> void:
 			if not open_proposal_for(c[0]).is_empty():
 				continue
 			if society.rng.randf() < drive * c[2] * 0.25:
-				_new_proposal(v, c[0], c[1], c[3])
+				_new_proposal(v, c[0], c[1], c[3], c[4] if c.size() > 4 else -1)
 				return  # one new idea at a time
 
 
-func _new_proposal(v: Villager, type: StringName, kind: String, reason: String) -> Dictionary:
+func _new_proposal(v: Villager, type: StringName, kind: String, reason: String, subject: int = -1) -> Dictionary:
 	var p := {"id": next_id, "type": String(type), "kind": kind, "proposer": v.villager_id, "reason": reason,
-		"day": SimClock.get_day(), "state": "open", "stances": {str(v.villager_id): 1}, "site": -1, "deadline": 0}
+		"day": SimClock.get_day(), "state": "open", "stances": {str(v.villager_id): 1}, "site": -1, "deadline": 0,
+		"subject": subject}
+	if subject >= 0:
+		society.culture.on_monument_planned(type, subject)
 	proposals[next_id] = p
 	next_id += 1
 	society.ctx.social.remember(v, &"proposed_project", -1, -1, -1, label_of(p))
@@ -156,7 +161,21 @@ func evaluate(v: Villager, p: Dictionary) -> Array:
 		if short > 0.0:
 			score -= minf(0.5, short / 60.0) * lerpf(1.4, 0.5, v.personality.get_trait(&"risk_tolerance"))
 	score += society.groups.guild_interest(v, type) * 0.4
+	# Beliefs: what the building stands for, and how the untried is seen.
+	var first: bool = p["kind"] == "building" and _built(type) == 0
+	var attitude := society.culture.project_attitude(v, type, first)
+	score += attitude * 0.5
+	if why == "" and absf(attitude) > 0.2:
+		why = "It is what we believe in." if attitude > 0.0 else "It goes against how we live."
 	return [clampf(score, -1.0, 1.0), why]
+
+
+func _built(def_id: StringName) -> int:
+	var n := 0
+	for b in society.ctx.tribe.buildings:
+		if b.def.id == def_id and b.is_complete:
+			n += 1
+	return n
 
 
 func set_stance(id: int, voter: int, stance: int) -> void:

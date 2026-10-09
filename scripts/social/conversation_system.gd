@@ -80,8 +80,20 @@ func _pair_up() -> void:
 			start(a, best)
 
 
+## Can `v` be pulled into a conversation right now? Never while eating,
+## resting or already talking.
+static func can_be_engaged(v: Villager) -> bool:
+	if v == null or v.is_dead or v.is_hidden():
+		return false
+	var t := v.current_task
+	return t == null or (t.is_interruptible() and not t is ConverseTask)
+
+
 ## Starts a conversation. With `forced_topic` the first villager is the speaker.
-func start(a: Villager, b: Villager, forced_topic: StringName = &"") -> void:
+## Returns false (and changes nothing) if the other person can't be engaged.
+func start(a: Villager, b: Villager, forced_topic: StringName = &"") -> bool:
+	if not can_be_engaged(b):
+		return false
 	var speaker := a
 	var listener := b
 	if forced_topic == &"":
@@ -105,6 +117,7 @@ func start(a: Villager, b: Villager, forced_topic: StringName = &"") -> void:
 	if not _pair_topics.has(key):
 		_pair_topics[key] = {}
 	_pair_topics[key][outcome.topic] = SimClock.sim_time
+	return true
 
 
 func _initiative(v: Villager) -> float:
@@ -157,6 +170,8 @@ func decide(s: Villager, l: Villager, forced_topic: StringName = &"") -> Convers
 	var handler := "_resolve_" + String(topic)
 	if has_method(handler):
 		call(handler, o, s, l, data)
+	elif social.ctx.society != null and social.ctx.society.culture.handles(topic):
+		social.ctx.society.culture.resolve(topic, o, s, l, data, self)
 	else:
 		_resolve_small_talk(o, s, l, data)
 	return o
@@ -187,6 +202,9 @@ func topic_weights(s: Villager, l: Villager, data: Dictionary = {}) -> Dictionar
 			w[&"teach"] = 1.0
 		if l.emotions.get_value(&"grief") > 0.3:
 			w[&"console"] = 1.5
+		# Adults tell children the tribe's stories and teach them what matters.
+		if social.ctx.society != null:
+			social.ctx.society.culture.add_topics(s, l, w, data)
 		return w
 
 	if s.needs.is_hungry() and l.inventory.carried_type == ResourceType.FOOD and l.inventory.amount > 0:
@@ -279,7 +297,8 @@ func _lines(o: ConversationOutcome, key: StringName, s: Villager, l: Villager, e
 
 func _resolve_small_talk(o: ConversationOutcome, s: Villager, l: Villager, _data: Dictionary) -> void:
 	var soc := (s.personality.get_trait(&"sociability") + l.personality.get_trait(&"sociability")) * 0.5
-	var compat := s.personality.compatibility(l.personality)
+	# Kindred temperaments and shared beliefs both make conversation easy.
+	var compat := s.personality.compatibility(l.personality) + (social.ctx.society.culture.similarity(s, l) - 0.5) * 0.3
 	var p := clampf(0.15 + 0.3 * soc + 0.5 * compat + 0.3 * social.graph.affinity(l.villager_id, s.villager_id), 0.05, 0.97)
 	o.success = social.rng.randf() < p
 	# Kindred spirits warm to each other faster; clashing temperaments cool.
@@ -714,7 +733,7 @@ func _resolve_teach(o: ConversationOutcome, s: Villager, l: Villager, data: Dict
 		o.add_memory(s.villager_id, &"ignored", l.villager_id)
 		_lines(o, &"teach_no", s, l, {"skill": String(skill)})
 		return
-	var strength := 0.06 * lerpf(0.7, 1.4, s.personality.get_trait(&"patience"))
+	var strength := 0.06 * lerpf(0.7, 1.4, s.personality.get_trait(&"patience")) * social.ctx.society.culture.learning_bonus(l, s)
 	o.teaching.append([s.villager_id, l.villager_id, skill, strength])
 	o.add_memory(s.villager_id, &"taught", l.villager_id, -1, String(skill))
 	o.add_memory(l.villager_id, &"was_taught", s.villager_id, -1, String(skill))
@@ -891,26 +910,6 @@ func _resolve_trade(o: ConversationOutcome, s: Villager, l: Villager, _data: Dic
 	o.success = false
 	o.add_memory(s.villager_id, &"was_refused", l.villager_id)
 	_lines(o, &"trade_no", s, l, {"price": str(price), "res": "goods"})
-
-
-func _resolve_tradition(o: ConversationOutcome, s: Villager, l: Villager, _data: Dictionary) -> void:
-	var names := social.ctx.society.culture.tradition_names()
-	if names.is_empty():
-		_resolve_small_talk(o, s, l, _data)
-		return
-	var t := names[social.rng.randi() % names.size()]
-	o.style = &"warm"
-	o.add_memory(s.villager_id, &"chatted", l.villager_id)
-	o.add_memory(l.villager_id, &"chatted", s.villager_id)
-	# Talking about shared customs reinforces them - or, for restless young
-	# minds, raises doubts.
-	if l.personality.get_trait(&"curiosity") > 0.7 and l.age_years < 25.0:
-		social.ctx.society.culture.shift(&"tradition", -0.01)
-		_lines(o, &"tradition", s, l, {"tradition": t.to_lower()})
-		o.line_listener = "Maybe. Or maybe it's time for something new."
-	else:
-		social.ctx.society.culture.shift(&"tradition", 0.005)
-		_lines(o, &"tradition", s, l, {"tradition": t.to_lower()})
 
 
 func _resolve_mediate(o: ConversationOutcome, s: Villager, l: Villager, _data: Dictionary) -> void:

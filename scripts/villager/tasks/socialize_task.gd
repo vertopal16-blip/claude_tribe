@@ -88,7 +88,8 @@ func _approach(dt: float) -> int:
 		var willing := 0.35 + 0.45 * target.personality.get_trait(&"sociability") \
 				+ 0.3 * social.closeness(target.villager_id, villager.villager_id)
 		if social.rng.randf() < willing:
-			social.conversations.start(villager, target)  # replaces this task
+			if not social.conversations.start(villager, target):  # replaces this task
+				return _fail("They were busy")
 			return Status.RUNNING
 		villager.say("Never mind...")
 		return _fail("Not now")

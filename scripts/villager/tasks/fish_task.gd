@@ -17,7 +17,10 @@ func start() -> bool:
 	if _spot == Vector3.INF:
 		return false
 	villager.set_state(VillagerState.MOVING_TO_RESOURCE)
-	return villager.movement.move_to(_spot, 4)
+	if not villager.movement.move_to(_spot, 4):
+		return false
+	ctx.society.culture.on_expedition(villager)
+	return true
 
 
 func tick(dt: float) -> int:

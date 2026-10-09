@@ -105,7 +105,8 @@ func conception_chance(v: Villager) -> float:
 	var children := children_of(v.villager_id).size()
 	var wish := 0.6 + 0.4 * (v.personality.get_trait(&"empathy") + v.personality.get_trait(&"sociability")) * 0.5
 	var age_factor := 1.0 - clampf((v.age_years - 32.0) / 14.0, 0.0, 0.8)
-	return ctx.config.conception_chance * clampf(bond + 0.3, 0.1, 1.2) * wish * age_factor / (1.0 + children * 0.6) \
+	return ctx.config.conception_chance * clampf(bond + 0.3, 0.1, 1.2) * wish * age_factor / (1.0 + children * 0.35) \
+			* society.culture.conception_factor(v) \
 			* (1.0 + 0.4 * v.emotions.mood())
 
 
@@ -134,7 +135,9 @@ func give_birth(mother: Villager) -> Villager:
 	var parents: Array[int] = [mother.villager_id]
 	if father_id >= 0:
 		parents.append(father_id)
-	var child := ctx.tribe.add_villager(mother.global_position, 0.0, sex, personality, skills, parents, new_name(rng))
+	var child_name := society.culture.name_for_child(parents, rng, new_name(rng))
+	_used_names[child_name] = true
+	var child := ctx.tribe.add_villager(mother.global_position, 0.0, sex, personality, skills, parents, child_name)
 	child.born_day = SimClock.get_day()
 	if mother.home != null and is_instance_valid(mother.home):
 		child.home = mother.home
@@ -153,6 +156,7 @@ func give_birth(mother: Villager) -> Villager:
 			ctx.social.remember(s, &"sibling_born", -1, child.villager_id)
 	society.history.add(&"birth", "%s was born to %s and %s." % [child.villager_name, mother.villager_name,
 			ctx.social.name_of(father_id)], [child.villager_id, mother.villager_id, father_id])
+	society.culture.on_birth(child, parents)
 	EventBus.villager_born.emit(child)
 	EventBus.notify("%s was born to %s and %s." % [child.villager_name, mother.villager_name, ctx.social.name_of(father_id)], &"social")
 	return child
@@ -249,6 +253,7 @@ func _track_stage(v: Villager) -> void:
 		&"adult":
 			ctx.social.remember(v, &"grew_up", -1, -1, -1, "an adult")
 			society.history.add(&"life", "%s has come of age." % v.villager_name, [v.villager_id])
+			society.culture.on_came_of_age(v)
 		&"elder":
 			society.history.add(&"life", "%s is now one of the elders." % v.villager_name, [v.villager_id])
 

@@ -95,6 +95,8 @@ func tick(dt: float) -> int:
 				_timer -= ctx.config.gather_interval
 				var got := node.harvest(1)
 				villager.inventory.add(resource_type, got)
+				if got > 0 and node.amount == 0 and node.kind == ResourceNode.Kind.TREE:
+					ctx.society.culture.on_tree_felled(villager, node)
 			if villager.inventory.free_space_for(resource_type) <= 0:
 				_release()
 				return _start_return()

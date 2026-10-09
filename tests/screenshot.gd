@@ -20,6 +20,11 @@ func _ready() -> void:
 			seed_value = int(arg.split("=")[1])
 		elif arg.begins_with("--shots="):
 			set_meta("max_shots", int(arg.split("=")[1]))
+		elif arg.begins_with("--load="):
+			# Start from a saved (e.g. culturally developed) tribe.
+			Main.pending_load = SaveSystem.read(arg.split("=")[1])
+		elif arg == "--culture":
+			set_meta("culture", true)
 	DirAccess.make_dir_recursive_absolute(out_dir)
 	var cfg: GameConfig = load("res://config/default_config.tres").duplicate()
 	cfg.world_seed = seed_value
@@ -27,6 +32,15 @@ func _ready() -> void:
 	main.config = cfg
 	add_child(main)
 	# name, run until this time of day (fraction), camera distance, yaw (deg), focus offset, select villager
+	if has_meta("culture"):
+		var d0 := float(SimClock.get_day() - 1) + SimClock.get_time_of_day()
+		shots = [
+			["culture_village", d0 + 0.02, 34.0, 35.0, Vector3.ZERO, false],
+			["culture_closeup", d0 + 0.04, 13.0, 20.0, Vector3.ZERO, true],
+			["culture_panel", d0 + 0.06, 40.0, 60.0, Vector3.ZERO, false],
+			["culture_inspector", d0 + 0.08, 14.0, 30.0, Vector3.ZERO, true],
+		]
+		return
 	shots = [
 		["overview_morning", 0.32, 60.0, 35.0, Vector3.ZERO, false],
 		["camp_closeup", 0.45, 16.0, 20.0, Vector3.ZERO, true],
@@ -78,8 +92,23 @@ func _process(_delta: float) -> void:
 		panels.inspect_mode = false
 		panels._chronicle.visible = false
 		panels._tribe.visible = false
+		panels._culture.visible = false
+		if shot[0] == "culture_village" or shot[0] == "culture_closeup":
+			for b in main.tribe.buildings:
+				if b.def.id in [&"gathering_circle", &"totem", &"memorial_stone"] and b.is_complete:
+					focus = b.global_position
+					break
+			if shot[0] == "culture_closeup":
+				# Show someone wearing the tribe's colours.
+				for v in main.tribe.villagers:
+					if v.adornment.has("sash"):
+						focus = v.global_position
+						main.interaction.select(v)
+						break
+			cam.focus_on(focus, true)
 		match shot[0]:
-			"inspector": panels.toggle_inspect()
+			"inspector", "culture_inspector": panels.toggle_inspect()
+			"culture_panel": panels.toggle_culture()
 			"tribe_panel": panels.toggle_tribe()
 			"chronicle": panels.toggle_chronicle()
 		if shot[0] == "placement":

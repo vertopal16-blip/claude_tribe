@@ -13,6 +13,8 @@ const LINES := {
 		["Did you hear? {event}", "I did. {event_reply}"],
 		["{shortage_remark}", "{shortage_reply}"],
 		["Your little {child} is growing fast.", "Faster than I'd like!"],
+		["Will you come to the {custom} tonight?", "I wouldn't miss it."],
+		["Nowhere is as beautiful as {place} in the evening.", "{place} is home."],
 		["The fire kept me warm last night.", "Mine too. It feels like home."],
 	],
 	&"small_talk_fail": [
@@ -85,7 +87,7 @@ static func render(key: StringName, rng: RandomNumberGenerator, values: Dictiona
 	for attempt in 4:
 		var ok := true
 		for line: String in pair:
-			for slot in ["{child}", "{event}", "{shortage_remark}"]:
+			for slot in ["{child}", "{event}", "{shortage_remark}", "{custom}", "{place}"]:
 				if line.contains(slot) and not values.has(slot.trim_prefix("{").trim_suffix("}")):
 					ok = false
 		if ok:
@@ -124,6 +126,15 @@ static func context_for(social: SocialSystem, s: Villager, l: Villager) -> Dicti
 			values["event"] = e["text"]
 			values["event_reply"] = "Who would have thought." if e["category"] != "death" else "Sad times."
 			break
+	# The tribe's own words, once it has them.
+	var culture := social.ctx.society.culture
+	var best := 0.4
+	for c in culture.customs.values():
+		if c["status"] in CultureSystem.ACTIVE and culture.devotion_of(s.villager_id, c["id"]) > best:
+			best = culture.devotion_of(s.villager_id, c["id"])
+			values["custom"] = String(c["word"]).capitalize()
+	if culture.language.knows(&"valley"):
+		values["place"] = culture.language.capitalized(&"valley")
 	var kids := social.ctx.society.demographics.children_of(l.villager_id)
 	for k in kids:
 		var c := social.get_villager(k)

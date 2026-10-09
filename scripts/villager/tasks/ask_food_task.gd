@@ -41,7 +41,8 @@ func tick(dt: float) -> int:
 	if not is_instance_valid(target) or target.inventory.carried_type != ResourceType.FOOD or not SocializeTask.approachable(target):
 		return _fail("They no longer have food")
 	if villager.global_position.distance_to(target.global_position) <= ASK_RANGE:
-		ctx.social.conversations.start(villager, target, &"ask_food")  # replaces this task
+		if not ctx.social.conversations.start(villager, target, &"ask_food"):  # replaces this task
+			return _fail("They were busy")
 		return Status.RUNNING
 	_repath_timer += dt
 	if _repath_timer >= REPATH_INTERVAL or villager.movement.status != VillagerMovement.MOVING:

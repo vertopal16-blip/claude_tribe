@@ -23,6 +23,7 @@ const BINDINGS := {
 	&"toggle_inspect": [KEY_I],
 	&"toggle_chronicle": [KEY_C],
 	&"toggle_tribe": [KEY_T],
+	&"toggle_culture": [KEY_K],
 	&"quick_save": [KEY_F5],
 	&"quick_load": [KEY_F9],
 }

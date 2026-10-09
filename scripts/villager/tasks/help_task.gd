@@ -11,7 +11,8 @@ var _repath_timer := 0.0
 
 
 func start() -> bool:
-	if villager.inventory.carried_type != ResourceType.FOOD:
+	# Someone going hungry themselves should eat first.
+	if villager.inventory.carried_type != ResourceType.FOOD or villager.needs.is_hungry():
 		return false
 	target = ctx.social.find_person_to_help(villager)
 	if target == null:
@@ -23,11 +24,12 @@ func start() -> bool:
 func tick(dt: float) -> int:
 	if not is_instance_valid(target) or target.is_dead or villager.inventory.carried_type != ResourceType.FOOD:
 		return _fail("No one to help")
-	if not target.needs.is_hungry():
-		return Status.SUCCEEDED
+	if not target.needs.is_hungry() or target.current_task is EatTask:
+		return Status.SUCCEEDED  # they are fed, or feeding themselves
 	if villager.global_position.distance_to(target.global_position) <= HANDOVER_RANGE and not target.is_hidden():
 		# Hands over to the conversation system; our task gets replaced.
-		ctx.social.conversations.start(villager, target, &"offer_food")
+		if not ctx.social.conversations.start(villager, target, &"offer_food"):
+			return _fail("They were busy")
 		return Status.RUNNING
 	_repath_timer += dt
 	if _repath_timer >= REPATH_INTERVAL or villager.movement.status != VillagerMovement.MOVING:

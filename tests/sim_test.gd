@@ -317,6 +317,10 @@ func _perf_report() -> void:
 	for k in tribe.perf_sections:
 		sections.append("%s=%.2f" % [k, tribe.perf_sections[k] / maxf(1.0, tribe.perf_ticks)])
 	print("[test] PERF per-tick sections (ms): %s" % " ".join(sections))
+	var maxes: PackedStringArray = []
+	for k in tribe.perf_section_max:
+		maxes.append("%s=%.1f" % [k, tribe.perf_section_max[k]])
+	print("[test] PERF worst tick per section (ms): %s" % " ".join(maxes))
 	check(tribe.population() > 0, "Large population still alive")
 	check(tribe.perf_mean_tick_ms() < 15.0, "Mean sim tick under 15 ms with %d villagers (%.2f ms)" % [tribe.population(), tribe.perf_mean_tick_ms()])
 

@@ -81,7 +81,7 @@ extends Resource
 @export var adult_age: float = 16.0
 @export var elder_age: float = 55.0
 @export var fertile_min_age: float = 17.0
-@export var fertile_max_age: float = 42.0
+@export var fertile_max_age: float = 45.0
 ## Days from conception to birth.
 @export var pregnancy_days: float = 3.0
 ## Minimum days between births for one mother.

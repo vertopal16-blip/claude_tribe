@@ -354,7 +354,7 @@ func find_person_to_help(v: Villager, max_distance: float = 50.0) -> Villager:
 			continue
 		if o.needs.hunger < ctx.config.hungry_threshold + 10.0:
 			continue
-		if o.inventory.carried_type == ResourceType.FOOD:
+		if o.inventory.carried_type == ResourceType.FOOD or o.current_task is EatTask:
 			continue
 		var d := v.global_position.distance_to(o.global_position)
 		if d > max_distance:

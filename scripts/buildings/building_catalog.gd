@@ -50,8 +50,8 @@ static func _ensure() -> void:
 	hut.rest_multiplier = 2.0
 	hut.player_buildable = true
 	hut.max_builders = 3
-	hut.housing = 4
-	hut.description = "Family home for up to 4. Sleeping inside restores energy twice as fast."
+	hut.housing = 6
+	hut.description = "Family home for up to 6. Sleeping inside restores energy twice as fast."
 	_defs[hut.id] = hut
 
 	var farm := BuildingDef.new()
@@ -96,3 +96,34 @@ static func _ensure() -> void:
 	shrine.build_work = 22.0
 	shrine.footprint_radius = 2.0
 	_defs[shrine.id] = shrine
+
+	# Cultural structures: only proposed once the tribe's culture calls for them.
+	var circle := BuildingDef.new()
+	circle.id = &"gathering_circle"
+	circle.display_name = "Gathering circle"
+	circle.description = "A ring of standing stones around a fire pit where the tribe holds its ceremonies."
+	circle.costs = {ResourceType.WOOD: 15, ResourceType.STONE: 35}
+	circle.build_work = 30.0
+	circle.footprint_radius = 4.4
+	circle.max_builders = 5
+	_defs[circle.id] = circle
+
+	var totem := BuildingDef.new()
+	totem.id = &"totem"
+	totem.display_name = "Totem"
+	totem.description = "A carved and painted pole showing the tribe's symbols."
+	totem.costs = {ResourceType.WOOD: 25, ResourceType.STONE: 5}
+	totem.build_work = 26.0
+	totem.footprint_radius = 1.0
+	totem.work_skill = &"woodcutting"
+	_defs[totem.id] = totem
+
+	var memorial := BuildingDef.new()
+	memorial.id = &"memorial_stone"
+	memorial.display_name = "Memorial stone"
+	memorial.description = "A standing stone raised in memory of someone the tribe will not forget."
+	memorial.costs = {ResourceType.STONE: 25}
+	memorial.build_work = 20.0
+	memorial.footprint_radius = 1.2
+	memorial.work_skill = &"stonework"
+	_defs[memorial.id] = memorial

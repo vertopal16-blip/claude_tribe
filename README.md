@@ -34,6 +34,7 @@ A new random valley is generated each run. Set `world_seed` in
 | I | Detailed inspector for the selected villager (decision trace, emotions, family, relationships) |
 | C | Chronicle: the tribe's history |
 | T | Tribe panel: government, culture, groups, professions, knowledge, economy |
+| K | Culture panel: values, customs, collective memory, language, art, and why they changed |
 | F5 / F9 | Quick save / quick load (`user://tribal_save.dat`) |
 | F3 | Performance overlay |
 
@@ -83,7 +84,9 @@ scripts/
               conversation_system.gd, conversation_outcome.gd, dialogue_renderer.gd,
               romance_system.gd, promise_book.gd, personality/social/emotion_modifier.gd
   society/    society_system.gd (owner) + demographics, tech, skills, professions, economy,
-              proposals, politics, groups, culture, history_log
+              proposals, politics, groups, culture_system, history_log
+  culture/    cultural_values.gd, custom_catalog.gd, lore_book.gd, tribal_language.gd,
+              tribal_aesthetics.gd, culture_modifier.gd
   buildings/  building_def.gd (data), building_catalog.gd, building.gd
   camera/     rts_camera.gd
   interaction/world_interaction.gd  raycast selection + placement ghost
@@ -152,6 +155,12 @@ households, families, work crews, guilds and factions. Nothing is scripted:
   lead to mediation. Culture norms and traditions drift and shape behaviour.
   Tools can be held in common or privately. Everything is recorded in a
   chronicle.
+- **Culture that emerges:** beliefs formed by experience and passed between
+  generations; customs born from repeated behaviour (and contested,
+  reformed, abandoned); stories that are retold, distorted and forgotten;
+  the tribe's own words and name; pigments, motifs, sashes, painted homes,
+  totems, memorials and architectural eras. Every game develops a
+  different culture. See [docs/CULTURE.md](docs/CULTURE.md).
 
 Select a villager and press **I** to see why they did what they did.
 
@@ -183,6 +192,14 @@ godot --headless --path . res://tests/society_test.tscn --fixed-fps 60 -- --seed
 godot --headless --path . res://tests/society_test.tscn --fixed-fps 60 -- --seed=42 --days=12 --save=/tmp/t.dat
 godot --headless --path . res://tests/society_test.tscn --fixed-fps 60 -- --seed=42 --load=/tmp/t.dat
 godot --headless --path . res://tests/sim_test.tscn --fixed-fps 60 -- --seed=42 --days=60 --history=400   # long run + chronicle
+```
+
+The culture test lets the tribe develop on its own, prints its culture and
+checks each cultural mechanism (A–J of the culture spec):
+
+```bash
+godot --headless --path . res://tests/culture_test.tscn --fixed-fps 60 -- --seed=42 --days=30
+godot --headless --path . res://tests/culture_test.tscn --fixed-fps 60 -- --seed=2024 --days=200 --report-only --chronicle
 ```
 
 Screenshots (needs a display or `xvfb-run`):

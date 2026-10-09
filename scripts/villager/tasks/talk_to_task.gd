@@ -31,7 +31,8 @@ func tick(dt: float) -> int:
 	if villager.global_position.distance_to(target.global_position) <= RANGE:
 		if not SocializeTask.approachable(target):
 			return _fail("They were busy")
-		ctx.social.conversations.start(villager, target, topic)
+		if not ctx.social.conversations.start(villager, target, topic):
+			return _fail("They were busy")
 		return Status.RUNNING
 	_repath += dt
 	if _repath >= 2.0 or villager.movement.status != VillagerMovement.MOVING:

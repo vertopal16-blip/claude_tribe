@@ -49,6 +49,8 @@ var endorsements: Array = []
 ## Skill practice from the talk itself: [villager_id, skill, seconds]
 var practice: Array = []
 var witnesses_fight := false
+## Cultural effects (stories learned, devotion, beliefs): see CultureSystem.apply_op.
+var culture_ops: Array = []
 var loneliness_relief := 45.0
 
 
@@ -87,6 +89,9 @@ func validate(social: SocialSystem) -> bool:
 			return false
 	for m in memories:
 		if not MemoryPolicy.has_kind(m[1]) or social.get_villager(m[0]) == null:
+			return false
+	for op in culture_ops:
+		if not social.ctx.society.culture.validate_op(op):
 			return false
 	return true
 
@@ -139,6 +144,8 @@ func apply(social: SocialSystem) -> void:
 				social.remember(w, &"saw_fight", speaker_id, listener_id)
 	for h in history:
 		social.ctx.society.history.add(h[0], h[1], h[2])
+	for op in culture_ops:
+		social.ctx.society.culture.apply_op(op)
 	social.graph.add_familiarity(speaker_id, listener_id, 0.04)
 	s.needs.social = maxf(0.0, s.needs.social - loneliness_relief)
 	l.needs.social = maxf(0.0, l.needs.social - loneliness_relief)

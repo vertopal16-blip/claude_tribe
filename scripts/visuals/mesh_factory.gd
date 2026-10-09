@@ -693,3 +693,164 @@ static func _transform_mesh(mesh: ArrayMesh, xf: Transform3D, key: String) -> Ar
 	out.surface_set_material(0, vertex_material())
 	_cache[key] = out
 	return out
+
+
+# --------------------------------------------------------------------------
+# Culture: adornments, painted decoration, monuments
+# --------------------------------------------------------------------------
+
+## What a villager wears to show the customs and roles they hold: a sash,
+## a headband, a belt stripe (transparent colours are left out).
+static func adornment(sash: Color, band: Color, belt: Color) -> ArrayMesh:
+	var key := "adorn_%s_%s_%s" % [sash.to_html(), band.to_html(), belt.to_html()]
+	if _cache.has(key):
+		return _cache[key]
+	var st := _begin()
+	if sash.a > 0.0:
+		add_box(st, Vector3(0, 0.86, 0), Vector3(0.09, 0.74, 0.5), sash, Basis(Vector3.FORWARD, 0.62))
+	if band.a > 0.0:
+		add_prism(st, Vector3(0, 0, 0.02), 8, 0.222, 0.222, 1.41, 1.47, band, null, false)
+	if belt.a > 0.0:
+		add_prism(st, Vector3.ZERO, 6, 0.312, 0.31, 0.6, 0.67, belt, null, false, PI / 6.0)
+	var mesh := _commit(st)
+	_cache[key] = mesh
+	return mesh
+
+
+## One small mark of the tribe's motif, centred at `c` on a wall facing `n`.
+static func _motif_mark(st: SurfaceTool, motif: String, c: Vector3, n: Vector3, col: Color, rng: RandomNumberGenerator) -> void:
+	var yaw := atan2(n.x, n.z)
+	var b := Basis(Vector3.UP, yaw)
+	match motif:
+		"dots":
+			for dy in [-0.12, 0.12]:
+				add_box(st, c + Vector3(0, dy, 0), Vector3(0.1, 0.1, 0.05), col, b)
+		"zigzags":
+			add_box(st, c + b * Vector3(-0.08, 0, 0), Vector3(0.06, 0.32, 0.05), col, b * Basis(Vector3.FORWARD, 0.6))
+			add_box(st, c + b * Vector3(0.08, 0, 0), Vector3(0.06, 0.32, 0.05), col, b * Basis(Vector3.FORWARD, -0.6))
+		"chevrons":
+			add_box(st, c + b * Vector3(-0.07, 0.04, 0), Vector3(0.06, 0.24, 0.05), col, b * Basis(Vector3.FORWARD, 0.9))
+			add_box(st, c + b * Vector3(0.07, 0.04, 0), Vector3(0.06, 0.24, 0.05), col, b * Basis(Vector3.FORWARD, -0.9))
+		"spirals", "rings":
+			add_blob(st, c, Vector3(0.13, 0.13, 0.05), col, rng, 0.05, false, 0.0)
+		"leaves":
+			add_blob(st, c, Vector3(0.08, 0.2, 0.05), col, rng, 0.05, false, 0.0)
+		"hatching":
+			for dx in [-0.1, 0.0, 0.1]:
+				add_box(st, c + b * Vector3(dx, 0, 0), Vector3(0.04, 0.3, 0.05), col, b)
+		_:  # bands
+			add_box(st, c, Vector3(0.36, 0.07, 0.05), col, b)
+
+
+## Painted bands, motif marks, door posts and timber frames in the style of
+## the era a building was made in.
+static func building_decor(def_id: StringName, colors: Dictionary) -> ArrayMesh:
+	var band: Color = colors.get("band", Color(0.7, 0.3, 0.2))
+	var accent: Color = colors.get("accent", band)
+	var motif: String = colors.get("motif", "")
+	var posts: bool = colors.get("posts", false)
+	var timber: bool = colors.get("timber", false)
+	var key := "decor_%s_%s_%s_%s_%s_%s" % [def_id, band.to_html(), accent.to_html(), motif, posts, timber]
+	if _cache.has(key):
+		return _cache[key]
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash(key)
+	var st := _begin()
+	match def_id:
+		&"hut":
+			add_prism(st, Vector3.ZERO, 9, 1.79, 1.77, 0.55, 0.72, band, null, false)
+			for i in 9:
+				var a := TAU * (i + 0.5) / 9.0
+				var n := Vector3(cos(a), 0, sin(a))
+				if absf(a - PI * 0.5) < 0.35:
+					continue  # leave the door clear
+				_motif_mark(st, motif, n * 1.74 + Vector3(0, 1.0, 0), n, accent, rng)
+				if timber:
+					var t := TAU * i / 9.0
+					add_box(st, Vector3(cos(t) * 1.74, 0.67, sin(t) * 1.74), Vector3(0.12, 1.34, 0.12), C_TRUNK_DARK, Basis(Vector3.UP, -t))
+			if posts:
+				for x in [-0.5, 0.5]:
+					add_prism(st, Vector3(x, 0, 1.78), 4, 0.08, 0.07, 0.0, 1.45, C_TRUNK_DARK, null, true)
+					add_blob(st, Vector3(x, 1.55, 1.78), Vector3(0.12, 0.12, 0.12), accent, rng, 0.1, false)
+		&"longhouse", &"workshop":
+			var w := 6.0 if def_id == &"longhouse" else 3.4
+			var d := 3.2 if def_id == &"longhouse" else 2.6
+			add_box(st, Vector3(0, 0.75, d * 0.5 + 0.02), Vector3(w, 0.16, 0.04), band)
+			add_box(st, Vector3(0, 0.75, -d * 0.5 - 0.02), Vector3(w, 0.16, 0.04), band)
+			for i in 5:
+				var x := -w * 0.4 + i * w * 0.2
+				_motif_mark(st, motif, Vector3(x, 1.15, d * 0.5 + 0.03), Vector3.BACK, accent, rng)
+		&"shrine":
+			add_prism(st, Vector3.ZERO, 6, 0.27, 0.22, 1.2, 1.5, band, null, false)
+			add_prism(st, Vector3.ZERO, 6, 0.22, 0.2, 1.9, 2.1, accent, null, false)
+		&"totem":
+			# Stacked carved segments in the tribe's colours, crowned with wings.
+			var cols := [band, accent, band.darkened(0.2), accent.lightened(0.15)]
+			for i in 4:
+				var y0 := 0.6 + i * 0.75
+				add_prism(st, Vector3.ZERO, 8, 0.36, 0.34, y0, y0 + 0.62, cols[i], rng, true)
+				_motif_mark(st, motif, Vector3(0, y0 + 0.31, 0.36), Vector3.BACK, cols[(i + 1) % 4], rng)
+			add_box(st, Vector3(0, 3.55, 0), Vector3(1.8, 0.16, 0.3), accent)
+			add_blob(st, Vector3(0, 3.85, 0), Vector3(0.3, 0.28, 0.3), band, rng, 0.08, false)
+		&"memorial_stone":
+			add_box(st, Vector3(0, 1.3, 0), Vector3(0.84, 0.14, 0.42), band)
+			_motif_mark(st, motif, Vector3(0, 1.75, 0.22), Vector3.BACK, accent, rng)
+			_motif_mark(st, motif, Vector3(0, 0.85, 0.22), Vector3.BACK, accent, rng)
+		&"gathering_circle":
+			for i in 10:
+				var a := TAU * i / 10.0
+				add_box(st, Vector3(cos(a) * 4.0, 1.12, sin(a) * 4.0), Vector3(0.48, 0.14, 0.38), band if i % 2 == 0 else accent, Basis(Vector3.UP, -a))
+	var mesh := _commit(st)
+	_cache[key] = mesh
+	return mesh
+
+
+static func totem() -> ArrayMesh:
+	if _cache.has("totem"):
+		return _cache["totem"]
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 9500
+	var st := _begin()
+	add_prism(st, Vector3.ZERO, 8, 0.32, 0.3, 0.0, 3.6, C_TRUNK, rng, true)
+	add_blob(st, Vector3(0, 0.12, 0), Vector3(0.7, 0.18, 0.7), C_ROCK, rng, 0.15, false)
+	var mesh := _commit(st)
+	_cache["totem"] = mesh
+	return mesh
+
+
+static func memorial_stone() -> ArrayMesh:
+	if _cache.has("memorial"):
+		return _cache["memorial"]
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 9600
+	var st := _begin()
+	add_box(st, Vector3(0, 1.1, 0), Vector3(0.8, 2.2, 0.4), C_ROCK.lightened(0.08))
+	add_blob(st, Vector3(0, 0.1, 0), Vector3(0.9, 0.16, 0.6), C_ROCK_DARK, rng, 0.2, false)
+	for i in 5:
+		var a := TAU * i / 5.0
+		add_blob(st, Vector3(cos(a) * 1.0, 0.12, sin(a) * 0.8), Vector3(0.18, 0.14, 0.18), C_ROCK, rng, 0.2, false)
+	var mesh := _commit(st)
+	_cache["memorial"] = mesh
+	return mesh
+
+
+static func gathering_circle() -> ArrayMesh:
+	if _cache.has("gathering"):
+		return _cache["gathering"]
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 9700
+	var st := _begin()
+	for i in 10:
+		var a := TAU * i / 10.0
+		add_box(st, Vector3(cos(a) * 4.0, 0.55, sin(a) * 4.0), Vector3(0.45, 1.1 + rng.randf() * 0.3, 0.35), C_ROCK.lightened(rng.randf() * 0.1),
+				Basis(Vector3.UP, -a))
+	# Fire pit and log benches
+	for i in 8:
+		var a := TAU * i / 8.0
+		add_blob(st, Vector3(cos(a) * 0.7, 0.1, sin(a) * 0.7), Vector3(0.16, 0.12, 0.16), C_STONE_RING, rng, 0.2, false)
+	for i in 4:
+		var a := TAU * (i + 0.5) / 4.0
+		add_box(st, Vector3(cos(a) * 2.4, 0.2, sin(a) * 2.4), Vector3(1.4, 0.3, 0.35), C_WOOD, Basis(Vector3.UP, -a + PI * 0.5))
+	var mesh := _commit(st)
+	_cache["gathering"] = mesh
+	return mesh

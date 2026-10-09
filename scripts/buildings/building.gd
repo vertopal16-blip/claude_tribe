@@ -28,6 +28,9 @@ var crop_growth := 0.0
 var harvests := 0
 ## Who is working here right now (farm / workshop), to avoid crowding.
 var workers := 0
+## Architectural era of the tribe's culture this building was decorated in (-1 = plain).
+var style_era := -1
+var _decor: MeshInstance3D
 var _crops: MeshInstance3D
 
 var _model: MeshInstance3D
@@ -95,7 +98,20 @@ static func model_mesh(d: BuildingDef) -> Mesh:
 		&"workshop": return MeshFactory.workshop()
 		&"longhouse": return MeshFactory.longhouse()
 		&"shrine": return MeshFactory.shrine()
+		&"totem": return MeshFactory.totem()
+		&"memorial_stone": return MeshFactory.memorial_stone()
+		&"gathering_circle": return MeshFactory.gathering_circle()
 	return MeshFactory.hut()
+
+
+## Paint / carve this building in the style of a cultural era.
+func apply_culture_style(era: int, colors: Dictionary) -> void:
+	style_era = era
+	if _decor == null:
+		_decor = MeshInstance3D.new()
+		add_child(_decor)
+	_decor.mesh = MeshFactory.building_decor(def.id, colors)
+	_decor.visible = is_complete
 
 
 func _add_mesh(mesh: Mesh, offset: Vector3 = Vector3.ZERO) -> MeshInstance3D:
@@ -241,6 +257,8 @@ func _refresh_visuals() -> void:
 	if _crops:
 		_crops.visible = is_complete and crop_growth > 0.02
 		_crops.scale = Vector3(1.0, maxf(0.05, crop_growth), 1.0)
+	if _decor:
+		_decor.visible = is_complete
 	if is_complete:
 		_model.scale = Vector3.ONE
 		_model.visible = true

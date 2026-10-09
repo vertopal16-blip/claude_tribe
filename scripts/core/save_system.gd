@@ -51,7 +51,7 @@ static func capture(main: Main) -> Dictionary:
 		buildings.append({"def": String(b.def.id), "pos": [b.global_position.x, b.global_position.z], "id": b.entity_id,
 			"complete": b.is_complete, "delivered": b.delivered.duplicate(), "work": b.work_done, "owners": b.owner_ids.duplicate(),
 			"contributors": b.contributor_ids.duplicate(), "project": b.project_id, "crop": b.crop_growth, "harvests": b.harvests,
-			"player": b.placed_by_player})
+			"player": b.placed_by_player, "style": b.style_era, "honours": int(b.get_meta("honours", -1))})
 	var villagers := []
 	for v in tribe.villagers:
 		villagers.append({"id": v.villager_id, "name": v.villager_name, "sex": String(v.sex), "age": v.age_years,
@@ -66,7 +66,7 @@ static func capture(main: Main) -> Dictionary:
 		"sim_time": SimClock.sim_time, "tick": SimClock.tick_count, "next_entity": ctx._next_entity_id,
 		"next_villager": tribe._next_villager_id, "stock": tribe.stockpile.amounts(),
 		"stock_totals": [tribe.stockpile.total_delivered.duplicate(), tribe.stockpile.total_consumed.duplicate()],
-		"tribe": {"auto_build": tribe.auto_build, "deaths": tribe.deaths},
+		"tribe": {"auto_build": tribe.auto_build, "deaths": tribe.deaths, "name": tribe.tribe_name},
 		"resources": resources, "buildings": buildings, "villagers": villagers,
 		"social": ctx.social.to_dict(), "society": ctx.society.to_dict(),
 	}
@@ -106,6 +106,9 @@ static func restore(main: Main, data: Dictionary) -> void:
 		b.crop_growth = float(bd["crop"])
 		b.harvests = int(bd["harvests"])
 		b.placed_by_player = bool(bd["player"])
+		b.style_era = int(bd.get("style", -1))
+		if int(bd.get("honours", -1)) >= 0:
+			b.set_meta("honours", int(bd["honours"]))
 		b._refresh_visuals()
 		by_id[b.entity_id] = b
 		if def.is_campfire:
@@ -119,6 +122,7 @@ static func restore(main: Main, data: Dictionary) -> void:
 	tribe.stockpile.total_consumed = Dictionary(data["stock_totals"][1]).duplicate()
 	tribe.auto_build = bool(data["tribe"]["auto_build"])
 	tribe.deaths = int(data["tribe"]["deaths"])
+	tribe.tribe_name = data["tribe"].get("name", tribe.tribe_name)
 	# Villagers
 	for vd in data["villagers"]:
 		var parents: Array[int] = []
